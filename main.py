@@ -1,4 +1,3 @@
-import asyncio
 from telegram.ext import Application, CommandHandler
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -6,11 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from analyzer import get_signal
 from portfolio import add_stock, remove_stock, get_portfolio_status, portfolio
 
-# ------------------- Ayarlar -------------------
 TOKEN = "8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU"
-CHAT_ID = 1328970821    # Opsiyonel, manuel mesaj göndermek için
+CHAT_ID = 1328970821
 
-# Örnek hisse listesi (BIST + NASDAQ)
 tickers = ["AAPL", "TSLA", "GOOGL", "MSFT", "AMZN", "ASELS.IS", "KCHOL.IS"]
 
 scheduler = AsyncIOScheduler()
@@ -55,7 +52,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_portfolio_status())
 
 # ------------------- Main -------------------
-async def main():
+def main():
     app = Application.builder().token(TOKEN).build()
     
     # Telegram komutları
@@ -69,7 +66,8 @@ async def main():
     scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"context": app})
     scheduler.start()
     
-    await app.run_polling()
+    # Burada asyncio.run kullanmaya gerek yok, run_polling kendi loop’unu yönetiyor
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
