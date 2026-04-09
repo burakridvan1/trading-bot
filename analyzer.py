@@ -1,92 +1,93 @@
+# analyzer.py
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
-# ------------------- Tüm Hisseler -------------------
-def get_all_us_tickers():
-    try:
-        table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-        tickers = table['Symbol'].tolist()
-        tickers = [t.replace('.', '-') for t in tickers]
-        return tickers
-    except:
-        return []
-
-def get_all_bist_tickers():
-    try:
-        table = pd.read_html("https://www.investing.com/indices/bist-100-components")[0]
-        tickers = table['Symbol'].apply(lambda x: x.strip() + ".IS").tolist()
-        return tickers
-    except:
-        return []
-
-# ------------------- Teknik İndikatörler -------------------
-def calculate_rsi(series, period=14):
+def calculate_rsi(series: pd.Series, period: int = 14):
     delta = series.diff()
     gain = delta.clip(lower=0)
-    loss = -1 * delta.clip(upper=0)
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def calculate_macd(df):
-    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-    macd = exp1 - exp2
-    signal = macd.ewm(span=9, adjust=False).mean()
-    return macd, signal
+def calculate_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd = ema_fast - ema_slow
+    signal_line = macd.ewm(span=signal, adjust=False).mean()
+    return macd, signal_line
 
-# ------------------- Hisse Analizi -------------------
-def get_stock_signal(ticker):
+def get_fundamental_signal(ticker: str):
+    """
+    Basit fundamental kontrol: PD/DD < 1.5, F/K < 20 vs.
+    """
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="3mo")
-        if df.empty:
+        info = yf.Ticker(ticker).info
+        pd_dd = info.get("priceToBook", 0)
+        pe_ratio = info.get("trailingPE", 0)
+        if pd_dd < 1.5 and pe_ratio < 20:
+            return True
+        return False
+    except:
+        return False
+
+def get_stock_signal(ticker: str, df: pd.DataFrame = None):
+    """
+    Hisseyi analiz eder ve STRONG BUY / SELL / HOLD döndürür
+    """
+    try:
+        if df is None:
+            df = yf.Ticker(ticker).history(period="60d")
+        if df.empty or len(df) < 30:
             return None
 
         # RSI
-        rsi = calculate_rsi(df['Close']).iloc[-1]
+        rsi = calculate_rsi(df['Close'])
+        last_rsi = rsi.iloc[-1]
 
         # MACD
-        macd, macd_signal = calculate_macd(df)
-        macd_last = macd.iloc[-1]
-        signal_last = macd_signal.iloc[-1]
+        macd, signal_line = calculate_macd(df['Close'])
+        last_macd = macd.iloc[-1]
+        last_signal = signal_line.iloc[-1]
 
-        # PD/DD (Price / Book Value)
-        info = stock.info
-        price_to_book = info.get('priceToBook', None)
-        current_price = info.get('currentPrice', None)
-        previous_close = df['Close'].iloc[-2]
+        # Fiyat hareketi
+        price_today = df['Close'].iloc[-1]
+        price_yesterday = df['Close'].iloc[-2]
 
-        # Basit temel kriterler
-        strong_buy = False
-        sell = False
+        # Fundamental
+        fundamental_ok = get_fundamental_signal(ticker)
 
-        # RSI kriteri: <30 ise aşırı satım
-        if rsi < 30:
-            strong_buy = True
-
-        # MACD kriteri: MACD > Signal line
-        if macd_last > signal_last:
-            strong_buy = strong_buy and True
-
-        # PD/DD kriteri: <1.5 ise ucuz
-        if price_to_book and price_to_book < 1.5:
-            strong_buy = strong_buy and True
-
-        # Fiyat düşerse SELL
-        if current_price < previous_close:
-            sell = True
-
-        if strong_buy:
+        # STRONG BUY koşulları
+        if last_rsi < 30 and last_macd > last_signal and price_today > price_yesterday and fundamental_ok:
             return "STRONG BUY"
-        elif sell:
+        # SELL koşulları
+        elif last_rsi > 70 or last_macd < last_signal or price_today < price_yesterday:
             return "SELL"
         else:
             return "HOLD"
-
     except Exception as e:
-        print(f"{ticker} analiz edilemedi:", e)
+        print(f"{ticker} analiz hatası:", e)
         return None
+
+def batch_get_signals(tickers: list):
+    """
+    Tüm tickers için batch veri çekip sinyal üretir
+    """
+    signals = {}
+    try:
+        # Toplu veri çekme
+        df_all = yf.download(tickers, period="60d", group_by='ticker', threads=True)
+        for ticker in tickers:
+            try:
+                df = df_all[ticker].copy()
+            except:
+                df = None
+            signal = get_stock_signal(ticker, df)
+            if signal:
+                signals[ticker] = signal
+    except Exception as e:
+        print("Batch veri çekme hatası:", e)
+    return signals
