@@ -1,89 +1,62 @@
-# main.py
 import asyncio
 import nest_asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+nest_asyncio.apply()
 
-from config import TELEGRAM_TOKEN
 from analyzer import batch_get_signals
-from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
+import yfinance as yf
+from telegram import Bot
+import pandas as pd
 
-nest_asyncio.apply()  # Jupyter veya Docker uyumu için
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
 
-scheduler = AsyncIOScheduler()
+bot = Bot(token=TELEGRAM_TOKEN)
 
-# ---------------- Telegram Komutları ----------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Merhaba! Hisse botuna hoşgeldiniz.")
+async def send_telegram_message(message):
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=message)
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Kullanım: /add TICKER")
-        return
-    ticker = context.args[0].upper()
-    if add_to_portfolio(update.message.from_user.id, ticker):
-        await update.message.reply_text(f"{ticker} portföyünüze eklendi.")
+
+async def get_all_tickers():
+    """
+    Tüm ABD ve BIST hisselerini toplar.
+    """
+    # NASDAQ + NYSE + SP500
+    sp500 = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]['Symbol'].tolist()
+    nasdaq = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[0]['Ticker'].tolist()
+    nyse = pd.read_html("https://en.wikipedia.org/wiki/List_of_largest_companies_on_the_New_York_Stock_Exchange")[0]['Symbol'].tolist()
+
+    # BIST
+    bist = pd.read_html("https://tr.wikipedia.org/wiki/Borsa_Istanbul")[0]
+    bist_tickers = bist[bist.columns[0]].astype(str).tolist()
+    bist_tickers = [t.replace('.','-') + ".IS" for t in bist_tickers]
+
+    tickers = list(set(sp500 + nasdaq + nyse + bist_tickers))
+    return tickers
+
+
+async def scan_and_notify():
+    tickers = await get_all_tickers()
+    print(f"Toplam {len(tickers)} hisse taranıyor...")
+    signals = batch_get_signals(tickers)
+    if signals:
+        for ticker, signal in signals.items():
+            await send_telegram_message(f"{ticker}: {signal}")
     else:
-        await update.message.reply_text(f"{ticker} zaten portföyünüzde.")
+        print("Hiç STRONG sinyal bulunamadı.")
 
-async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Kullanım: /remove TICKER")
-        return
-    ticker = context.args[0].upper()
-    if remove_from_portfolio(update.message.from_user.id, ticker):
-        await update.message.reply_text(f"{ticker} portföyünüzden çıkarıldı.")
-    else:
-        await update.message.reply_text(f"{ticker} portföyünüzde yok.")
 
-async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    portfolio = get_portfolio(update.message.from_user.id)
-    if not portfolio:
-        await update.message.reply_text("Portföyünüz boş.")
-        return
-    msg = "Portföyünüz:\n" + "\n".join(portfolio)
-    await update.message.reply_text(msg)
+async def periodic_scan(interval_minutes=10):
+    while True:
+        await scan_and_notify()
+        await asyncio.sleep(interval_minutes * 60)
 
-# ---------------- Scheduler Fonksiyonları ----------------
-async def scan_market(context):
-    results = batch_get_signals()
-    for ticker, signal in results.items():
-        if signal == "STRONG BUY":
-            # Tüm kullanıcılara STRONG BUY sinyali gönder
-            for user_id in context.bot_data.get("users", []):
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
-        elif signal == "SELL":
-            # Tüm kullanıcılara SELL sinyali gönder
-            for user_id in context.bot_data.get("users", []):
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
-async def check_portfolio(context):
-    for user_id, tickers in context.bot_data.get("users", {}).items():
-        for ticker in tickers:
-            signal = batch_get_signals().get(ticker)
-            if signal == "SELL":
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
-
-# ---------------- Main ----------------
 async def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    await periodic_scan(interval_minutes=10)
 
-    # Komutlar
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add))
-    app.add_handler(CommandHandler("remove", remove))
-    app.add_handler(CommandHandler("portfolio", portfolio_cmd))
-
-    # Scheduler işleri
-    scheduler.add_job(scan_market, "interval", minutes=60, kwargs={"context": app})
-    scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"context": app})
-    scheduler.start()
-
-    # Kullanıcı verisi için boş dict
-    app.bot_data["users"] = {}
-
-    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
