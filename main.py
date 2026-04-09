@@ -11,8 +11,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ====== Environment Variables ======
-TOKEN = os.environ.get("8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU")
-CHAT_ID = int(os.environ.get("1328970821"))
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = int(os.environ.get("CHAT_ID"))
 
 PORTFOLIO_FILE = "portfolio.json"
 
