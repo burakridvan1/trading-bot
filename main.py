@@ -1,4 +1,3 @@
-# main.py
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -6,9 +5,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import TELEGRAM_TOKEN
 from analyzer import get_stock_signal, get_all_us_tickers, get_all_bist_tickers
-from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio, PORTFOLIOS
+from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
 
-# ---------------- Scheduler ----------------
 scheduler = AsyncIOScheduler()
 
 # ---------------- Telegram Komutları ----------------
@@ -43,29 +41,39 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Portföyünüz:\n" + "\n".join(portfolio)
     await update.message.reply_text(msg)
 
-# ---------------- Piyasa Tarama ----------------
+# ---------------- Scheduler Fonksiyonları ----------------
 async def scan_market(app):
-    us_tickers = get_all_us_tickers()
-    bist_tickers = get_all_bist_tickers()
-    tickers = us_tickers + bist_tickers
+    try:
+        us_tickers = get_all_us_tickers()
+        bist_tickers = get_all_bist_tickers()
+        tickers = us_tickers + bist_tickers
 
-    for ticker in tickers:
-        signal = get_stock_signal(ticker)
-        if signal == "STRONG BUY":
-            for user_id in PORTFOLIOS.keys():
-                await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
-
-# ---------------- Portföy Kontrol ----------------
-async def check_portfolio(app):
-    for user_id, tickers in PORTFOLIOS.items():
         for ticker in tickers:
             signal = get_stock_signal(ticker)
-            if signal == "SELL":
-                await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
+            if signal == "STRONG BUY":
+                # Tüm kullanıcılara STRONG BUY sinyali gönder
+                for user_id in app.bot_data.get("users", []):
+                    await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
+    except Exception as e:
+        print("Piyasa taraması hata:", e)
+
+async def check_portfolio(app):
+    try:
+        for user_id, tickers in app.bot_data.get("users", {}).items():
+            for ticker in tickers:
+                signal = get_stock_signal(ticker)
+                if signal == "SELL":
+                    await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
+    except Exception as e:
+        print("Portföy kontrolü hata:", e)
 
 # ---------------- Main ----------------
 async def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Initialize bot_data kullanıcı dict
+    if "users" not in app.bot_data:
+        app.bot_data["users"] = {}
 
     # Komutlar
     app.add_handler(CommandHandler("start", start))
@@ -74,8 +82,8 @@ async def main():
     app.add_handler(CommandHandler("portfolio", portfolio_cmd))
 
     # Scheduler işleri
-    scheduler.add_job(lambda: scan_market(app), "interval", minutes=60)
-    scheduler.add_job(lambda: check_portfolio(app), "interval", minutes=30)
+    scheduler.add_job(scan_market, "interval", minutes=60, kwargs={"app": app})
+    scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"app": app})
     scheduler.start()
 
     await app.run_polling()
