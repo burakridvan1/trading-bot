@@ -3,3 +3,4 @@ apscheduler==3.11.0
 yfinance
 pandas
 numpy
+nest_asyncio
