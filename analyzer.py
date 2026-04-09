@@ -3,13 +3,15 @@ import ta
 import pandas as pd
 
 def analyze(ticker):
-    # Veriyi çek
+    # Veri çek
     df = yf.download(ticker, period="3mo", interval="1d")
-
     if df.empty:
         return 0, 0, 0
 
-    close = df['Close']
+    # Close sütununu 1D Series yap
+    close = df['Close'].copy()
+    if isinstance(close, pd.DataFrame):
+        close = close.squeeze()  # shape=(n,1) → shape=(n,)
 
     # RSI
     df['rsi'] = ta.momentum.RSIIndicator(close).rsi()
@@ -21,10 +23,11 @@ def analyze(ticker):
 
     last = df.iloc[-1]
 
-    # last['macd'] ve last['macd_signal'] tek değer olmalı
+    # MACD ve MACD signal tek değer
     macd_value = last['macd']
     macd_signal = last['macd_signal']
 
+    # Eğer hala Series ise tek eleman al
     if isinstance(macd_value, pd.Series):
         macd_value = macd_value.iloc[-1]
     if isinstance(macd_signal, pd.Series):
