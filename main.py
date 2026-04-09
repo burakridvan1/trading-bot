@@ -8,8 +8,6 @@ from config import TELEGRAM_TOKEN
 from analyzer import get_stock_signal
 from portfolio import PORTFOLIOS, add_to_portfolio, remove_from_portfolio, get_portfolio
 
-scheduler = AsyncIOScheduler()
-
 # ---------------- Telegram Komutları ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Merhaba! Hisse botuna hoşgeldiniz.")
@@ -43,15 +41,15 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 # ---------------- Scheduler Fonksiyonları ----------------
-async def scan_market():
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # BIST eklenebilir
+async def scan_market(app):
+    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # örnek ABD hisseleri
     for ticker in tickers:
         signal = get_stock_signal(ticker)
         if signal == "STRONG BUY":
             for user_id in PORTFOLIOS.keys():
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
 
-async def check_portfolio():
+async def check_portfolio(app):
     for user_id, tickers in PORTFOLIOS.items():
         for ticker in tickers:
             signal = get_stock_signal(ticker)
@@ -59,8 +57,7 @@ async def check_portfolio():
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
 # ---------------- Main ----------------
-def main():
-    global app
+async def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Komutlar
@@ -70,12 +67,13 @@ def main():
     app.add_handler(CommandHandler("portfolio", portfolio_cmd))
 
     # Scheduler işleri
-    scheduler.add_job(lambda: asyncio.create_task(scan_market()), "interval", minutes=60)
-    scheduler.add_job(lambda: asyncio.create_task(check_portfolio()), "interval", minutes=30)
-    scheduler.start()
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(lambda: asyncio.create_task(scan_market(app)), "interval", minutes=60)
+    scheduler.add_job(lambda: asyncio.create_task(check_portfolio(app)), "interval", minutes=30)
+    scheduler.start()  # artık event loop içindeyiz, hata yok
 
-    # run_polling() kendi içinde initialize ediyor, start() çağırmaya gerek yok
-    app.run_polling()
+    # Botu çalıştır
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
