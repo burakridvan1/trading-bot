@@ -1,5 +1,4 @@
 python-telegram-bot==20.4
-yfinance
-pandas
-requests
-apscheduler
+apscheduler==3.10.6
+yfinance==0.2.22
+pandas==2.1.1
