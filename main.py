@@ -42,7 +42,8 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Scheduler Fonksiyonları ----------------
 async def scan_market(app):
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]
+    # ABD + BIST örnek listesi (dilersen burayı yfinance listelerinden çekebilirsin)
+    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META","ASELS.IS","THYAO.IS","GARAN.IS","MU","HYMC"]
     for ticker in tickers:
         signal = get_stock_signal(ticker)
         if signal == "STRONG BUY":
@@ -55,7 +56,6 @@ async def check_portfolio(app):
             signal = get_stock_signal(ticker)
             if signal == "SELL":
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
-
 # ---------------- Main ----------------
 def main():
     loop = asyncio.get_event_loop()  # Mevcut loop'u al
