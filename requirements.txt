@@ -1,4 +1,5 @@
-python-telegram-bot==20.5
-yfinance==0.2.41
-apscheduler==3.12.1
-httpx==0.26.1
+python-telegram-bot==20.4
+yfinance
+pandas
+requests
+apscheduler
