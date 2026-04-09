@@ -5,8 +5,11 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import TELEGRAM_TOKEN
-from analyzer import get_stock_signal
-from portfolio import PORTFOLIOS, add_to_portfolio, remove_from_portfolio, get_portfolio
+from analyzer import get_stock_signal, get_all_us_tickers, get_all_bist_tickers
+from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio, PORTFOLIOS
+
+# ---------------- Scheduler ----------------
+scheduler = AsyncIOScheduler()
 
 # ---------------- Telegram Komutları ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,25 +43,28 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Portföyünüz:\n" + "\n".join(portfolio)
     await update.message.reply_text(msg)
 
-# ---------------- Scheduler Fonksiyonları ----------------
+# ---------------- Piyasa Tarama ----------------
 async def scan_market(app):
-    # ABD + BIST örnek listesi (dilersen burayı yfinance listelerinden çekebilirsin)
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META","ASELS.IS","THYAO.IS","GARAN.IS","MU","HYMC"]
+    us_tickers = get_all_us_tickers()
+    bist_tickers = get_all_bist_tickers()
+    tickers = us_tickers + bist_tickers
+
     for ticker in tickers:
         signal = get_stock_signal(ticker)
         if signal == "STRONG BUY":
             for user_id in PORTFOLIOS.keys():
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
 
+# ---------------- Portföy Kontrol ----------------
 async def check_portfolio(app):
     for user_id, tickers in PORTFOLIOS.items():
         for ticker in tickers:
             signal = get_stock_signal(ticker)
             if signal == "SELL":
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
+
 # ---------------- Main ----------------
-def main():
-    loop = asyncio.get_event_loop()  # Mevcut loop'u al
+async def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Komutlar
@@ -68,14 +74,11 @@ def main():
     app.add_handler(CommandHandler("portfolio", portfolio_cmd))
 
     # Scheduler işleri
-    scheduler = AsyncIOScheduler(event_loop=loop)
-    scheduler.add_job(lambda: asyncio.create_task(scan_market(app)), "interval", minutes=60)
-    scheduler.add_job(lambda: asyncio.create_task(check_portfolio(app)), "interval", minutes=30)
+    scheduler.add_job(lambda: scan_market(app), "interval", minutes=60)
+    scheduler.add_job(lambda: check_portfolio(app), "interval", minutes=30)
     scheduler.start()
 
-    # Botu başlat
-    loop.create_task(app.run_polling())
-    loop.run_forever()  # Mevcut loop'u kapatmadan çalıştır
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
