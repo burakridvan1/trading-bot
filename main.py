@@ -1,62 +1,63 @@
 import asyncio
+import pandas as pd
+import yfinance as yf
 import nest_asyncio
+from analyzer import batch_get_signals
+from telegram import Bot
+
 nest_asyncio.apply()
 
-from analyzer import batch_get_signals
-import yfinance as yf
-from telegram import Bot
-import pandas as pd
+TOKEN = "TELEGRAM_BOT_TOKEN"  # buraya kendi bot tokenini koy
+CHAT_ID = "TELEGRAM_CHAT_ID"   # buraya kendi chat id
 
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
-
-bot = Bot(token=TELEGRAM_TOKEN)
-
-async def send_telegram_message(message):
-    try:
-        await bot.send_message(chat_id=CHAT_ID, text=message)
-    except Exception as e:
-        print(f"Telegram Error: {e}")
-
+bot = Bot(TOKEN)
 
 async def get_all_tickers():
     """
-    Tüm ABD ve BIST hisselerini toplar.
+    ABD (NASDAQ + NYSE + S&P500) + BIST tickers listesini getirir.
     """
-    # NASDAQ + NYSE + SP500
-    sp500 = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]['Symbol'].tolist()
-    nasdaq = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[0]['Ticker'].tolist()
-    nyse = pd.read_html("https://en.wikipedia.org/wiki/List_of_largest_companies_on_the_New_York_Stock_Exchange")[0]['Symbol'].tolist()
+    # ABD S&P500
+    sp500 = pd.read_html(
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+        flavor='lxml'
+    )[0]['Symbol'].tolist()
+
+    # ABD NASDAQ ve NYSE (yfinance tickers) - yfinance.download ile tüm hisseleri çekmek için kullanılabilir
+    # yfinance'in tüm tickers listesi için basit bir JSON endpoint kullanılabilir:
+    nasdaq = pd.read_html("https://www.nasdaq.com/market-activity/stocks/screener")[0]['Symbol'].tolist()
+    nyse = pd.read_html("https://www.nyse.com/listings_directory/stock")[0]['Symbol'].tolist()
 
     # BIST
-    bist = pd.read_html("https://tr.wikipedia.org/wiki/Borsa_Istanbul")[0]
-    bist_tickers = bist[bist.columns[0]].astype(str).tolist()
-    bist_tickers = [t.replace('.','-') + ".IS" for t in bist_tickers]
+    bist = pd.read_html("https://tr.investing.com/indices/borsa-istanbul-100-components")[0]['Symbol'].tolist()
 
-    tickers = list(set(sp500 + nasdaq + nyse + bist_tickers))
+    # Tümünü birleştir
+    tickers = list(set(sp500 + nasdaq + nyse + bist))
     return tickers
-
 
 async def scan_and_notify():
     tickers = await get_all_tickers()
-    print(f"Toplam {len(tickers)} hisse taranıyor...")
-    signals = batch_get_signals(tickers)
-    if signals:
-        for ticker, signal in signals.items():
-            await send_telegram_message(f"{ticker}: {signal}")
-    else:
-        print("Hiç STRONG sinyal bulunamadı.")
+    print(f"{len(tickers)} adet hisse taranıyor...")
 
+    signals = await batch_get_signals(tickers)
+    if not signals:
+        print("STRONG sinyal yok.")
+        return
 
-async def periodic_scan(interval_minutes=10):
+    for ticker, signal in signals.items():
+        message = f"{ticker}: {signal}"
+        await bot.send_message(chat_id=CHAT_ID, text=message)
+        print(message)
+
+async def periodic_scan(interval_minutes=30):
+    """
+    Her interval_minutes dakikada bir tarama yapar.
+    """
     while True:
         await scan_and_notify()
         await asyncio.sleep(interval_minutes * 60)
 
-
 async def main():
-    await periodic_scan(interval_minutes=10)
-
+    await periodic_scan(interval_minutes=10)  # her 10 dakikada bir tarar
 
 if __name__ == "__main__":
     asyncio.run(main())
