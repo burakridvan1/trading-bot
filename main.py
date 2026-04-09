@@ -6,8 +6,8 @@ from telegram import Bot
 
 nest_asyncio.apply()
 
-TOKEN = "TELEGRAM_BOT_TOKEN"
-CHAT_ID = "TELEGRAM_CHAT_ID"
+TOKEN = "8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU"
+CHAT_ID = "1328970821"
 
 bot = Bot(token=TOKEN)
 
