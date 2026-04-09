@@ -1,11 +1,14 @@
 # main.py
 import asyncio
+import pandas as pd
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from analyzer import batch_get_signals
 from config import TELEGRAM_TOKEN
 from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
+import nest_asyncio
+import httpx
 
 scheduler = AsyncIOScheduler()
 
@@ -41,17 +44,38 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Portföyünüz:\n" + "\n".join(portfolio)
     await update.message.reply_text(msg)
 
-# ---------------- Scheduler ----------------
-ALL_TICKERS = []  # Burayı BIST + ABD listesi ile dolduracağız
+# ---------------- Otomatik Hisse Listesi ----------------
+ALL_TICKERS = []
 
+async def fetch_sp500_tickers():
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    df_list = pd.read_html(url)
+    df = df_list[0]
+    return df['Symbol'].tolist()
+
+async def fetch_bist100_tickers():
+    # BIST100 listesini bir web kaynağından çekiyoruz
+    url = "https://www.finzplus.com/bist100-hisseleri"
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url)
+        dfs = pd.read_html(r.text)
+        # İlk tabloda "Sembol" kolonu var
+        for df in dfs:
+            if 'Sembol' in df.columns:
+                return [s.replace('.', '-')+'.IS' for s in df['Sembol'].tolist()]
+    return []
+
+async def update_all_tickers():
+    global ALL_TICKERS
+    sp500 = await fetch_sp500_tickers()
+    bist100 = await fetch_bist100_tickers()
+    ALL_TICKERS = sp500 + bist100
+    print(f"Toplam {len(ALL_TICKERS)} hisse listelendi.")
+
+# ---------------- Scheduler ----------------
 async def scan_market(app):
     if not ALL_TICKERS:
-        # S&P500 ve BIST100 hisselerini tek seferde çekmek için hazır liste
-        # Burada örnek basit ticker listesi var, gerçek listeleri CSV veya API ile çekebilirsin
-        sp500 = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]
-        bist100 = ["ASELS.IS","THYAO.IS","GARAN.IS"]
-        global ALL_TICKERS
-        ALL_TICKERS = sp500 + bist100
+        await update_all_tickers()
 
     signals = batch_get_signals(ALL_TICKERS)
     if not signals:
@@ -90,6 +114,5 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    import nest_asyncio
     nest_asyncio.apply()
     asyncio.run(main())
