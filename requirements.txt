@@ -5,3 +5,6 @@ pandas
 numpy
 nest_asyncio
 ta
+lxml
+beautifulsoup4
+html5lib
