@@ -10,7 +10,6 @@ from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
 
 scheduler = AsyncIOScheduler()
 
-# ---------------- Telegram Komutları ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Merhaba! Hisse botuna hoşgeldiniz.")
 
@@ -43,24 +42,24 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 # ---------------- Scheduler Fonksiyonları ----------------
-async def scan_market(context):
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # örnek ABD hisseleri
+async def scan_market():
+    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # buraya BIST hisseleri de ekleyebilirsin
     for ticker in tickers:
         signal = get_stock_signal(ticker)
         if signal == "STRONG BUY":
-            # Tüm kullanıcılara STRONG BUY sinyali gönder
-            for user_id in context.bot_data.get("users", []):
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
+            for user_id in PORTFOLIOS.keys():
+                await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
 
-async def check_portfolio(context):
-    for user_id, tickers in context.bot_data.get("users", {}).items():
+async def check_portfolio():
+    for user_id, tickers in PORTFOLIOS.items():
         for ticker in tickers:
             signal = get_stock_signal(ticker)
             if signal == "SELL":
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
+                await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
 # ---------------- Main ----------------
 async def main():
+    global app
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
     # Komutlar
@@ -70,11 +69,13 @@ async def main():
     app.add_handler(CommandHandler("portfolio", portfolio_cmd))
 
     # Scheduler işleri
-    scheduler.add_job(scan_market, "interval", minutes=60, kwargs={"context": app})
-    scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"context": app})
+    scheduler.add_job(lambda: asyncio.create_task(scan_market()), "interval", minutes=60)
+    scheduler.add_job(lambda: asyncio.create_task(check_portfolio()), "interval", minutes=30)
     scheduler.start()
     
-    await app.run_polling()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
