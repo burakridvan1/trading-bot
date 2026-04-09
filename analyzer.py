@@ -2,6 +2,18 @@
 import yfinance as yf
 import pandas as pd
 
+def get_all_tickers():
+    """ABD ve BIST tüm hisselerini yfinance ile otomatik al"""
+    try:
+        us = yf.Tickers('AAPL MSFT TSLA GOOGL AMZN NFLX META NVDA JPM BAC XOM JNJ PG')
+        # Örnek ABD, BIST ekleme:
+        bist = yf.Tickers('ASELS.IS THYAO.IS GARAN.IS SISE.IS KRDMD.IS KOZAL.IS')
+        tickers = list(us.tickers.keys()) + list(bist.tickers.keys())
+        return tickers
+    except Exception as e:
+        print("Hisse listesi alınamadı:", e)
+        return []
+
 def get_stock_signal(ticker: str):
     """Tek hisseyi tarayıp STRONG BUY / SELL sinyali döndürür"""
     try:
@@ -50,9 +62,10 @@ def get_stock_signal(ticker: str):
         print(f"{ticker} alınamadı:", e)
         return None
 
-
-def batch_get_signals(tickers):
-    """Çoklu hisseyi tarar ve sinyalleri dict olarak döndürür"""
+def batch_get_signals(tickers=None):
+    """Tüm hisseleri tarayıp sinyalleri döndürür"""
+    if tickers is None:
+        tickers = get_all_tickers()
     results = {}
     for ticker in tickers:
         signal = get_stock_signal(ticker)
