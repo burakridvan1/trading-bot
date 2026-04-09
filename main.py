@@ -9,8 +9,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 # Ayarlar
 # ----------------------------
 TOKEN = "8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU"
-PORTFOLIO = ["AAPL", "TSLA"]       # Kendi portföyün
-MARKET = ["GOOGL", "MSFT", "AMZN"] # Takip etmek istediğin piyasa hisseleri
+PORTFOLIO = ["AAPL", "TSLA"]
+MARKET = ["GOOGL", "MSFT", "AMZN"]
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -35,7 +35,7 @@ async def portfolio_check(context: ContextTypes.DEFAULT_TYPE = None):
         except Exception as e:
             logging.warning(f"{ticker} alınamadı: {e}")
 
-    if context and hasattr(context, "bot") and context.job:
+    if context and hasattr(context, "bot") and getattr(context, "job", None):
         await context.bot.send_message(chat_id=context.job.chat_id, text=message)
     else:
         print(message)
@@ -45,7 +45,6 @@ async def portfolio_check(context: ContextTypes.DEFAULT_TYPE = None):
 # ----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Merhaba! Portföy takibine hazır.")
-    # Hemen bir portföy kontrolü yap
     await portfolio_check(context)
 
 # ----------------------------
@@ -54,25 +53,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # Komutları ekle
+    # Komut ekle
     app.add_handler(CommandHandler("start", start))
     
     # Scheduler
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(portfolio_check, "interval", hours=1)  # Her 1 saatte bir çalışacak
+    scheduler.add_job(portfolio_check, "interval", hours=1)
     scheduler.start()
     
     # Botu başlat
-    await app.run_polling()
+    await app.initialize()
+    await app.start()
+    try:
+        await app.updater.start_polling()
+    finally:
+        await app.stop()
+        await app.shutdown()
 
 # ----------------------------
 # Başlat
 # ----------------------------
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
-    except RuntimeError:
-        # Jupyter/Docker vs async loop zaten çalışıyorsa:
         loop = asyncio.get_event_loop()
-        loop.create_task(main())
-        loop.run_forever()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    loop.create_task(main())
+    loop.run_forever()
