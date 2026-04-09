@@ -6,10 +6,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import TELEGRAM_TOKEN
 from analyzer import get_stock_signal
-from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
+from portfolio import PORTFOLIOS, add_to_portfolio, remove_from_portfolio, get_portfolio
 
 scheduler = AsyncIOScheduler()
 
+# ---------------- Telegram Komutları ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Merhaba! Hisse botuna hoşgeldiniz.")
 
@@ -43,7 +44,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Scheduler Fonksiyonları ----------------
 async def scan_market():
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # buraya BIST hisseleri de ekleyebilirsin
+    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # BIST eklenebilir
     for ticker in tickers:
         signal = get_stock_signal(ticker)
         if signal == "STRONG BUY":
@@ -58,10 +59,10 @@ async def check_portfolio():
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
 # ---------------- Main ----------------
-async def main():
+def main():
     global app
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-    
+
     # Komutlar
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add))
@@ -72,10 +73,9 @@ async def main():
     scheduler.add_job(lambda: asyncio.create_task(scan_market()), "interval", minutes=60)
     scheduler.add_job(lambda: asyncio.create_task(check_portfolio()), "interval", minutes=30)
     scheduler.start()
-    
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+
+    # run_polling() kendi içinde initialize ediyor, start() çağırmaya gerek yok
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
