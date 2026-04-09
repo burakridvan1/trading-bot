@@ -47,8 +47,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Scheduler Fonksiyonları ----------------
 async def scan_market(context):
-    # ABD ve BIST tüm önemli hisseleri
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META","ASELS.IS","THYAO.IS","GARAN.IS"]  # Daha fazla eklenebilir
+    tickers = None  # None => tüm piyasayı tarayacak
     signals = batch_get_signals(tickers)
     for ticker, signal in signals.items():
         if signal == "STRONG BUY":
