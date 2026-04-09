@@ -35,6 +35,7 @@ async def portfolio_check(context: ContextTypes.DEFAULT_TYPE = None):
         except Exception as e:
             logging.warning(f"{ticker} alınamadı: {e}")
 
+    # Eğer Telegram context mevcutsa, mesaj gönder
     if context and hasattr(context, "bot") and getattr(context, "job", None):
         await context.bot.send_message(chat_id=context.job.chat_id, text=message)
     else:
