@@ -1,21 +1,22 @@
 import os
 import json
 import threading
-import schedule
 import time
+import schedule
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Environment Variables
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = int(os.environ.get("CHAT_ID"))
+# ====== Environment Variables ======
+TOKEN = os.environ.get("8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU")
+CHAT_ID = int(os.environ.get("1328970821"))
 
 PORTFOLIO_FILE = "portfolio.json"
 
-# Portföy yükleme
+# ====== Portföy yönetimi ======
 try:
     with open(PORTFOLIO_FILE, "r") as f:
         portfolio = json.load(f)
@@ -26,7 +27,6 @@ def save_portfolio():
     with open(PORTFOLIO_FILE, "w") as f:
         json.dump(portfolio, f)
 
-# ====== Telegram komutları ======
 async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Lütfen bir hisse girin: /ekle TICKER")
@@ -55,17 +55,23 @@ async def portfoy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "\n".join(portfolio.keys())
     await update.message.reply_text(f"Portföydeki hisseler:\n{text}")
 
-# ====== AL/SAT analizi ======
+# ====== Telegram mesaj gönder ======
+def send_telegram(msg):
+    requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                 params={"chat_id": CHAT_ID, "text": msg})
+
+# ====== Teknik + Temel Analiz ======
 def run_analysis():
     if not portfolio:
         return
     for ticker in portfolio.keys():
         try:
+            # Tarihsel fiyat
             data = yf.download(ticker, period="2mo", interval="1d")['Close']
-            if data.empty:
+            if data.empty: 
                 continue
 
-            # RSI
+            # ===== RSI =====
             delta = data.diff()
             up = delta.clip(lower=0)
             down = -1*delta.clip(upper=0)
@@ -75,7 +81,7 @@ def run_analysis():
             RSI = 100.0 - (100.0 / (1.0 + RS))
             latest_rsi = RSI.iloc[-1]
 
-            # Basit MACD
+            # ===== MACD =====
             ema12 = data.ewm(span=12, adjust=False).mean()
             ema26 = data.ewm(span=26, adjust=False).mean()
             MACD = ema12 - ema26
@@ -83,22 +89,27 @@ def run_analysis():
             latest_macd = MACD.iloc[-1]
             latest_signal = signal.iloc[-1]
 
-            # Basit al/sat sinyali
+            # ===== Temel veriler =====
+            info = yf.Ticker(ticker).info
+            fk = info.get('forwardPE')
+            pdd = info.get('priceToBook')
+            volume = info.get('volume')
+
+            # ===== Basit al/sat mantığı =====
+            msg = f"{ticker} | RSI:{latest_rsi:.1f} MACD:{latest_macd:.2f} FK:{fk} PD/DD:{pdd} Hacim:{volume}"
             if latest_rsi < 30 and latest_macd > latest_signal:
-                msg = f"{ticker} 📈 AL sinyali! RSI: {latest_rsi:.1f}, MACD: {latest_macd:.2f}"
-                send_telegram(msg)
+                send_telegram("📈 AL sinyali! " + msg)
             elif latest_rsi > 70 and latest_macd < latest_signal:
-                msg = f"{ticker} 📉 SAT sinyali! RSI: {latest_rsi:.1f}, MACD: {latest_macd:.2f}"
-                send_telegram(msg)
+                send_telegram("📉 SAT sinyali! " + msg)
 
         except Exception as e:
             print(f"Hata {ticker}: {e}")
 
-# Telegram mesaj gönderme
-def send_telegram(msg):
-    import requests
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.get(url, params={"chat_id": CHAT_ID, "text": msg})
+# ====== Schedule Thread ======
+def schedule_thread():
+    while True:
+        schedule.run_pending()
+        time.sleep(10)
 
 # ====== Bot Başlat ======
 if __name__ == "__main__":
@@ -107,15 +118,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("sil", sil))
     app.add_handler(CommandHandler("portfoy", portfoy))
 
-    # Schedule analizi ayrı thread
+    # Analiz için schedule
     schedule.every(15).minutes.do(run_analysis)
-    threading.Thread(target=lambda: schedule.run_pending_loop(), daemon=True).start()
+    threading.Thread(target=schedule_thread, daemon=True).start()
 
-    # Bot polling
+    # Telegram bot polling
     app.run_polling()
-
-# ====== Schedule helper ======
-def schedule_run_pending_loop():
-    while True:
-        schedule.run_pending()
-        time.sleep(10)
