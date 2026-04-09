@@ -1,8 +1,6 @@
 # main.py
 import asyncio
 import nest_asyncio
-nest_asyncio.apply()
-
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -10,6 +8,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import TELEGRAM_TOKEN
 from analyzer import batch_get_signals
 from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
+
+nest_asyncio.apply()  # Jupyter veya Docker uyumu için
 
 scheduler = AsyncIOScheduler()
 
@@ -47,17 +47,21 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Scheduler Fonksiyonları ----------------
 async def scan_market(context):
-    tickers = None  # None => tüm piyasayı tarayacak
-    signals = batch_get_signals(tickers)
-    for ticker, signal in signals.items():
+    results = batch_get_signals()
+    for ticker, signal in results.items():
         if signal == "STRONG BUY":
+            # Tüm kullanıcılara STRONG BUY sinyali gönder
             for user_id in context.bot_data.get("users", []):
                 await context.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
+        elif signal == "SELL":
+            # Tüm kullanıcılara SELL sinyali gönder
+            for user_id in context.bot_data.get("users", []):
+                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
 async def check_portfolio(context):
     for user_id, tickers in context.bot_data.get("users", {}).items():
-        signals = batch_get_signals(tickers)
-        for ticker, signal in signals.items():
+        for ticker in tickers:
+            signal = batch_get_signals().get(ticker)
             if signal == "SELL":
                 await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
@@ -75,6 +79,9 @@ async def main():
     scheduler.add_job(scan_market, "interval", minutes=60, kwargs={"context": app})
     scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"context": app})
     scheduler.start()
+
+    # Kullanıcı verisi için boş dict
+    app.bot_data["users"] = {}
 
     await app.run_polling()
 
