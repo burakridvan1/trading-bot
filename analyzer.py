@@ -1,93 +1,55 @@
 # analyzer.py
 import yfinance as yf
 import pandas as pd
-import numpy as np
 
-def calculate_rsi(series: pd.Series, period: int = 14):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-def calculate_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
-    ema_fast = series.ewm(span=fast, adjust=False).mean()
-    ema_slow = series.ewm(span=slow, adjust=False).mean()
-    macd = ema_fast - ema_slow
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd, signal_line
-
-def get_fundamental_signal(ticker: str):
+def get_stock_signal(ticker: str):
     """
-    Basit fundamental kontrol: PD/DD < 1.5, F/K < 20 vs.
+    Hisseyi alır ve temel göstergeleri kontrol edip STRONG BUY / SELL üretir
+    Göstergeler: RSI, MACD, PD/DD, Basit Bilanço kontrolü
     """
     try:
-        info = yf.Ticker(ticker).info
-        pd_dd = info.get("priceToBook", 0)
-        pe_ratio = info.get("trailingPE", 0)
-        if pd_dd < 1.5 and pe_ratio < 20:
-            return True
-        return False
-    except:
-        return False
-
-def get_stock_signal(ticker: str, df: pd.DataFrame = None):
-    """
-    Hisseyi analiz eder ve STRONG BUY / SELL / HOLD döndürür
-    """
-    try:
-        if df is None:
-            df = yf.Ticker(ticker).history(period="60d")
-        if df.empty or len(df) < 30:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="6mo")  # 6 aylık fiyat verisi
+        if df.empty or len(df) < 2:
             return None
 
-        # RSI
-        rsi = calculate_rsi(df['Close'])
-        last_rsi = rsi.iloc[-1]
+        # ----- RSI Hesaplama -----
+        delta = df["Close"].diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.rolling(14).mean().iloc[-1]
+        avg_loss = loss.rolling(14).mean().iloc[-1]
+        rsi = 100 - (100 / (1 + avg_gain / (avg_loss + 1e-6)))
 
-        # MACD
-        macd, signal_line = calculate_macd(df['Close'])
-        last_macd = macd.iloc[-1]
-        last_signal = signal_line.iloc[-1]
+        # ----- MACD Hesaplama -----
+        ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+        ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal_line = macd.ewm(span=9, adjust=False).mean()
+        macd_signal = macd.iloc[-1] - signal_line.iloc[-1]
 
-        # Fiyat hareketi
-        price_today = df['Close'].iloc[-1]
-        price_yesterday = df['Close'].iloc[-2]
+        # ----- Basit Fiyat/Kazanç ve Bilanço -----
+        pe_ratio = stock.info.get("trailingPE", None)
+        pb_ratio = stock.info.get("priceToBook", None)
 
-        # Fundamental
-        fundamental_ok = get_fundamental_signal(ticker)
+        # ----- STRONG BUY / SELL Kararı -----
+        strong_buy = rsi < 30 and macd_signal > 0
+        sell = rsi > 70 and macd_signal < 0
 
-        # STRONG BUY koşulları
-        if last_rsi < 30 and last_macd > last_signal and price_today > price_yesterday and fundamental_ok:
+        # Ek koşullar: PE ve PB makul ise buy, aşırı yüksekse sell
+        if pe_ratio and pb_ratio:
+            if pe_ratio < 15 and pb_ratio < 3 and strong_buy:
+                return "STRONG BUY"
+            elif pe_ratio > 30 and pb_ratio > 5 and sell:
+                return "SELL"
+        
+        if strong_buy:
             return "STRONG BUY"
-        # SELL koşulları
-        elif last_rsi > 70 or last_macd < last_signal or price_today < price_yesterday:
+        elif sell:
             return "SELL"
         else:
             return "HOLD"
-    except Exception as e:
-        print(f"{ticker} analiz hatası:", e)
-        return None
 
-def batch_get_signals(tickers: list):
-    """
-    Tüm tickers için batch veri çekip sinyal üretir
-    """
-    signals = {}
-    try:
-        # Toplu veri çekme
-        df_all = yf.download(tickers, period="60d", group_by='ticker', threads=True)
-        for ticker in tickers:
-            try:
-                df = df_all[ticker].copy()
-            except:
-                df = None
-            signal = get_stock_signal(ticker, df)
-            if signal:
-                signals[ticker] = signal
     except Exception as e:
-        print("Batch veri çekme hatası:", e)
-    return signals
+        print(f"{ticker} alınamadı:", e)
+        return None
