@@ -1,94 +1,62 @@
-# analyzer.py
 import yfinance as yf
-import pandas as pd
-import numpy as np
+from ta.momentum import RSIIndicator
+from ta.trend import MACD, SMAIndicator, EMAIndicator
+from ta.volatility import BollingerBands
 
-def get_all_tickers():
+def get_signals(ticker):
     """
-    ABD + BIST tüm hisse sembollerini alır.
-    ABD: NASDAQ + NYSE
-    BIST: BIST100 sembolleri
-    """
-    # ABD hisseleri (yfinance Tickers sınıfını kullanıyoruz)
-    try:
-        nasdaq = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[3]  # NASDAQ-100 tablosu
-        nyse = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]  # S&P500 tablosu
-        tickers_us = nasdaq['Ticker'].tolist() + nyse['Symbol'].tolist()
-        tickers_us = [t.replace('.', '-') for t in tickers_us]  # yfinance uyumu
-    except Exception as e:
-        print("ABD hisseleri alınamadı:", e)
-        tickers_us = []
-
-    # BIST100 sembolleri
-    try:
-        bist100 = pd.read_html("https://tr.wikipedia.org/wiki/Borsa_Istanbul_100")[0]
-        tickers_bist = [str(t).replace('.', '-') + ".IS" for t in bist100['Sembol']]
-    except Exception as e:
-        print("BIST hisseleri alınamadı:", e)
-        tickers_bist = []
-
-    return tickers_us + tickers_bist
-
-
-def get_stock_signal(ticker: str):
-    """
-    Hisse için STRONG BUY / SELL / HOLD sinyali üretir
-    Teknik ve temel göstergeler kullanılır (RSI, MACD, PD/DD, bilanço)
+    Tek bir hisse için tüm indikatörleri kontrol eder
+    ve 'STRONG BUY', 'STRONG SELL' veya 'HOLD' döndürür.
     """
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="60d")
-        if df.empty:
+        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+        if df.empty or len(df) < 20:
             return None
 
-        # -------- RSI Hesaplama --------
-        delta = df['Close'].diff()
-        gain = delta.clip(lower=0)
-        loss = -1 * delta.clip(upper=0)
-        avg_gain = gain.rolling(14).mean().iloc[-1]
-        avg_loss = loss.rolling(14).mean().iloc[-1]
-        rsi = 100 - (100 / (1 + (avg_gain / (avg_loss + 0.0001))))
+        # RSI
+        rsi = RSIIndicator(df['Close'], window=14).rsi()
+        rsi_signal = 'BUY' if rsi.iloc[-1] < 30 else 'SELL' if rsi.iloc[-1] > 70 else 'HOLD'
 
-        # -------- MACD Hesaplama --------
-        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-        macd = exp1 - exp2
-        signal_line = macd.ewm(span=9, adjust=False).mean()
-        macd_signal = macd.iloc[-1] - signal_line.iloc[-1]
+        # MACD
+        macd = MACD(df['Close'])
+        macd_signal = 'BUY' if macd.macd_diff().iloc[-1] > 0 else 'SELL' if macd.macd_diff().iloc[-1] < 0 else 'HOLD'
 
-        # -------- Temel Göstergeler --------
-        try:
-            info = stock.info
-            pd_ratio = info.get('priceToBook', None)
-            debt_equity = info.get('debtToEquity', None)
-        except:
-            pd_ratio = None
-            debt_equity = None
+        # SMA trend
+        sma_short = SMAIndicator(df['Close'], window=20).sma_indicator()
+        sma_long = SMAIndicator(df['Close'], window=50).sma_indicator()
+        sma_signal = 'BUY' if sma_short.iloc[-1] > sma_long.iloc[-1] else 'SELL' if sma_short.iloc[-1] < sma_long.iloc[-1] else 'HOLD'
 
-        # -------- STRONG BUY / SELL Kararı --------
-        # Basit kriterler:
-        # RSI < 30 ve MACD pozitif → STRONG BUY
-        # RSI > 70 veya MACD negatif → SELL
-        if rsi < 30 and macd_signal > 0:
-            return "STRONG BUY"
-        elif rsi > 70 or macd_signal < 0:
-            return "SELL"
+        # EMA trend
+        ema_short = EMAIndicator(df['Close'], window=20).ema_indicator()
+        ema_long = EMAIndicator(df['Close'], window=50).ema_indicator()
+        ema_signal = 'BUY' if ema_short.iloc[-1] > ema_long.iloc[-1] else 'SELL' if ema_short.iloc[-1] < ema_long.iloc[-1] else 'HOLD'
+
+        # Bollinger Bands
+        bb = BollingerBands(df['Close'], window=20, window_dev=2)
+        bb_signal = 'BUY' if df['Close'].iloc[-1] < bb.bollinger_lband().iloc[-1] else 'SELL' if df['Close'].iloc[-1] > bb.bollinger_hband().iloc[-1] else 'HOLD'
+
+        signals = [rsi_signal, macd_signal, sma_signal, ema_signal, bb_signal]
+
+        # STRONG BUY / STRONG SELL
+        if signals.count('BUY') >= 4:
+            return 'STRONG BUY'
+        elif signals.count('SELL') >= 4:
+            return 'STRONG SELL'
         else:
-            return "HOLD"
+            return 'HOLD'
 
     except Exception as e:
-        print(f"{ticker} alınamadı:", e)
+        print(f"Error for {ticker}: {e}")
         return None
 
 
-def batch_get_signals():
+def batch_get_signals(tickers):
     """
-    Tüm hisse senetlerini tarar ve STRONG BUY olanları döndürür
+    Liste halinde hisse tarar ve sinyal olanları döndürür.
     """
-    tickers = get_all_tickers()
     results = {}
     for ticker in tickers:
-        signal = get_stock_signal(ticker)
-        if signal in ["STRONG BUY", "SELL"]:
+        signal = get_signals(ticker)
+        if signal in ['STRONG BUY', 'STRONG SELL']:
             results[ticker] = signal
     return results
