@@ -42,7 +42,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Scheduler Fonksiyonları ----------------
 async def scan_market(app):
-    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]  # örnek ABD hisseleri
+    tickers = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]
     for ticker in tickers:
         signal = get_stock_signal(ticker)
         if signal == "STRONG BUY":
@@ -57,7 +57,8 @@ async def check_portfolio(app):
                 await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
 # ---------------- Main ----------------
-async def main():
+def main():
+    loop = asyncio.get_event_loop()  # Mevcut loop'u al
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Komutlar
@@ -67,13 +68,14 @@ async def main():
     app.add_handler(CommandHandler("portfolio", portfolio_cmd))
 
     # Scheduler işleri
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(event_loop=loop)
     scheduler.add_job(lambda: asyncio.create_task(scan_market(app)), "interval", minutes=60)
     scheduler.add_job(lambda: asyncio.create_task(check_portfolio(app)), "interval", minutes=30)
-    scheduler.start()  # artık event loop içindeyiz, hata yok
+    scheduler.start()
 
-    # Botu çalıştır
-    await app.run_polling()
+    # Botu başlat
+    loop.create_task(app.run_polling())
+    loop.run_forever()  # Mevcut loop'u kapatmadan çalıştır
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
