@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 import yfinance as yf
 
-TOKEN = "BOT_TOKENINIZI_BURAYA"
+TOKEN = "8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
