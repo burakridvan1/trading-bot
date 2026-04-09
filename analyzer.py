@@ -1,82 +1,92 @@
-# analyzer.py
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
+# ------------------- Tüm Hisseler -------------------
+def get_all_us_tickers():
+    try:
+        table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
+        tickers = table['Symbol'].tolist()
+        tickers = [t.replace('.', '-') for t in tickers]
+        return tickers
+    except:
+        return []
+
+def get_all_bist_tickers():
+    try:
+        table = pd.read_html("https://www.investing.com/indices/bist-100-components")[0]
+        tickers = table['Symbol'].apply(lambda x: x.strip() + ".IS").tolist()
+        return tickers
+    except:
+        return []
+
+# ------------------- Teknik İndikatörler -------------------
 def calculate_rsi(series, period=14):
     delta = series.diff()
-    up = delta.clip(lower=0)
-    down = -1 * delta.clip(upper=0)
-    avg_gain = up.rolling(period, min_periods=1).mean()
-    avg_loss = down.rolling(period, min_periods=1).mean()
-    rs = avg_gain / avg_loss.replace(0, 1)
+    gain = delta.clip(lower=0)
+    loss = -1 * delta.clip(upper=0)
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def calculate_macd(series, fast=12, slow=26, signal=9):
-    ema_fast = series.ewm(span=fast, adjust=False).mean()
-    ema_slow = series.ewm(span=slow, adjust=False).mean()
-    macd = ema_fast - ema_slow
-    macd_signal = macd.ewm(span=signal, adjust=False).mean()
-    return macd, macd_signal
+def calculate_macd(df):
+    exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    return macd, signal
 
-def get_stock_signal(ticker: str):
-    """
-    STRONG BUY / SELL sinyali üreten fonksiyon
-    RSI < 30 -> oversold -> BUY
-    MACD crossover -> BUY/SELL
-    PD/DD < 1.5 -> değerli -> BUY
-    Son bilanço olumlu -> BUY
-    """
+# ------------------- Hisse Analizi -------------------
+def get_stock_signal(ticker):
     try:
         stock = yf.Ticker(ticker)
-        df = stock.history(period="6mo")
-        if df.empty or len(df) < 30:
+        df = stock.history(period="3mo")
+        if df.empty:
             return None
 
-        close = df["Close"]
+        # RSI
+        rsi = calculate_rsi(df['Close']).iloc[-1]
 
-        # ----- RSI -----
-        rsi = calculate_rsi(close)
-        latest_rsi = rsi.iloc[-1]
+        # MACD
+        macd, macd_signal = calculate_macd(df)
+        macd_last = macd.iloc[-1]
+        signal_last = macd_signal.iloc[-1]
 
-        # ----- MACD -----
-        macd, macd_signal = calculate_macd(close)
-        latest_macd = macd.iloc[-1]
-        latest_signal = macd_signal.iloc[-1]
-
-        # MACD crossover kontrolü
-        macd_buy = latest_macd > latest_signal and macd.iloc[-2] <= macd_signal.iloc[-2]
-        macd_sell = latest_macd < latest_signal and macd.iloc[-2] >= macd_signal.iloc[-2]
-
-        # ----- Temel analiz -----
+        # PD/DD (Price / Book Value)
         info = stock.info
-        pe_ratio = info.get("forwardPE", None) or info.get("trailingPE", None)
-        pb_ratio = info.get("priceToBook", None)
-        pd_ratio = info.get("debtToEquity", None)
-        earnings = info.get("earningsQuarterlyGrowth", None)
+        price_to_book = info.get('priceToBook', None)
+        current_price = info.get('currentPrice', None)
+        previous_close = df['Close'].iloc[-2]
 
-        strong_buy_conditions = [
-            latest_rsi < 30,
-            macd_buy,
-            pd_ratio is not None and pd_ratio < 1.5,
-            earnings is not None and earnings > 0
-        ]
+        # Basit temel kriterler
+        strong_buy = False
+        sell = False
 
-        strong_sell_conditions = [
-            latest_rsi > 70,
-            macd_sell,
-            pd_ratio is not None and pd_ratio > 2.5,
-            earnings is not None and earnings < 0
-        ]
+        # RSI kriteri: <30 ise aşırı satım
+        if rsi < 30:
+            strong_buy = True
 
-        if all(strong_buy_conditions):
+        # MACD kriteri: MACD > Signal line
+        if macd_last > signal_last:
+            strong_buy = strong_buy and True
+
+        # PD/DD kriteri: <1.5 ise ucuz
+        if price_to_book and price_to_book < 1.5:
+            strong_buy = strong_buy and True
+
+        # Fiyat düşerse SELL
+        if current_price < previous_close:
+            sell = True
+
+        if strong_buy:
             return "STRONG BUY"
-        elif all(strong_sell_conditions):
+        elif sell:
             return "SELL"
         else:
             return "HOLD"
 
     except Exception as e:
-        print(f"{ticker} alınamadı:", e)
+        print(f"{ticker} analiz edilemedi:", e)
         return None
