@@ -1,28 +1,21 @@
-from typing import List, Tuple
-from analyzer import get_signal
+# portfolio.py
+from typing import Dict
 
-# Portföy listesi: (ticker, adet)
-portfolio: List[Tuple[str, int]] = []
+PORTFOLIOS: Dict[int, list] = {}  # user_id -> list of tickers
 
-def add_stock(ticker: str, qty: int):
-    for i, (t, q) in enumerate(portfolio):
-        if t == ticker:
-            portfolio[i] = (t, q + qty)
-            return
-    portfolio.append((ticker, qty))
+def add_to_portfolio(user_id: int, ticker: str):
+    if user_id not in PORTFOLIOS:
+        PORTFOLIOS[user_id] = []
+    if ticker not in PORTFOLIOS[user_id]:
+        PORTFOLIOS[user_id].append(ticker)
+        return True
+    return False
 
-def remove_stock(ticker: str, qty: int):
-    for i, (t, q) in enumerate(portfolio):
-        if t == ticker:
-            if q <= qty:
-                portfolio.pop(i)
-            else:
-                portfolio[i] = (t, q - qty)
-            return
+def remove_from_portfolio(user_id: int, ticker: str):
+    if user_id in PORTFOLIOS and ticker in PORTFOLIOS[user_id]:
+        PORTFOLIOS[user_id].remove(ticker)
+        return True
+    return False
 
-def get_portfolio_status():
-    status = []
-    for ticker, qty in portfolio:
-        signal = get_signal(ticker)
-        status.append(f"{ticker}: {signal} (adet: {qty})")
-    return "\n".join(status) if status else "Portföy boş."
+def get_portfolio(user_id: int):
+    return PORTFOLIOS.get(user_id, [])
