@@ -8,7 +8,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 # ----------------------------
 # Ayarlar
 # ----------------------------
-TOKEN = "BOT_TOKENINIZI_BURAYA_YAZIN"
+TOKEN = "8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU"
 PORTFOLIO = ["AAPL", "TSLA"]       # Kendi portföyün
 MARKET = ["GOOGL", "MSFT", "AMZN"] # Takip etmek istediğin piyasa hisseleri
 
