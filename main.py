@@ -1,10 +1,10 @@
+# main.py
 import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
+from analyzer import batch_get_signals
 from config import TELEGRAM_TOKEN
-from analyzer import get_stock_signal, get_all_us_tickers, get_all_bist_tickers
 from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
 
 scheduler = AsyncIOScheduler()
@@ -41,39 +41,39 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Portföyünüz:\n" + "\n".join(portfolio)
     await update.message.reply_text(msg)
 
-# ---------------- Scheduler Fonksiyonları ----------------
-async def scan_market(app):
-    try:
-        us_tickers = get_all_us_tickers()
-        bist_tickers = get_all_bist_tickers()
-        tickers = us_tickers + bist_tickers
+# ---------------- Scheduler ----------------
+ALL_TICKERS = []  # Burayı BIST + ABD listesi ile dolduracağız
 
-        for ticker in tickers:
-            signal = get_stock_signal(ticker)
-            if signal == "STRONG BUY":
-                # Tüm kullanıcılara STRONG BUY sinyali gönder
-                for user_id in app.bot_data.get("users", []):
-                    await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
-    except Exception as e:
-        print("Piyasa taraması hata:", e)
+async def scan_market(app):
+    if not ALL_TICKERS:
+        # S&P500 ve BIST100 hisselerini tek seferde çekmek için hazır liste
+        # Burada örnek basit ticker listesi var, gerçek listeleri CSV veya API ile çekebilirsin
+        sp500 = ["AAPL","TSLA","GOOGL","MSFT","AMZN","NFLX","META"]
+        bist100 = ["ASELS.IS","THYAO.IS","GARAN.IS"]
+        global ALL_TICKERS
+        ALL_TICKERS = sp500 + bist100
+
+    signals = batch_get_signals(ALL_TICKERS)
+    if not signals:
+        return
+
+    for ticker, signal in signals.items():
+        if signal == "STRONG BUY":
+            for user_id in app.bot_data.get("users", []):
+                await app.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
 
 async def check_portfolio(app):
-    try:
-        for user_id, tickers in app.bot_data.get("users", {}).items():
-            for ticker in tickers:
-                signal = get_stock_signal(ticker)
-                if signal == "SELL":
-                    await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
-    except Exception as e:
-        print("Portföy kontrolü hata:", e)
+    for user_id, tickers in app.bot_data.get("users", {}).items():
+        if not tickers:
+            continue
+        signals = batch_get_signals(tickers)
+        for ticker, signal in signals.items():
+            if signal == "SELL":
+                await app.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
 
 # ---------------- Main ----------------
 async def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Initialize bot_data kullanıcı dict
-    if "users" not in app.bot_data:
-        app.bot_data["users"] = {}
 
     # Komutlar
     app.add_handler(CommandHandler("start", start))
@@ -86,7 +86,10 @@ async def main():
     scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"app": app})
     scheduler.start()
 
+    await app.initialize()
     await app.run_polling()
 
 if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
     asyncio.run(main())
