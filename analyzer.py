@@ -3,9 +3,6 @@ import pandas as pd
 import yfinance as yf
 
 
-# =========================
-# RSI
-# =========================
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
@@ -14,9 +11,6 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 
-# =========================
-# MARKET BENCHMARK
-# =========================
 def spy_benchmark():
     data = yf.download("SPY", period="1mo", interval="1d", progress=False)
     if data is None or data.empty:
@@ -24,9 +18,6 @@ def spy_benchmark():
     return float(data["Close"].pct_change().mean())
 
 
-# =========================
-# CORE ANALYSIS ENGINE
-# =========================
 def analyze_stock(ticker):
     try:
         df = yf.download(ticker, period="6mo", interval="1d", progress=False)
@@ -40,7 +31,6 @@ def analyze_stock(ticker):
         df["ma200"] = df["Close"].rolling(200).mean()
 
         df["rsi"] = rsi(df["Close"])
-        df["ret"] = df["Close"].pct_change()
 
         last = df.iloc[-1]
 
@@ -63,72 +53,71 @@ def analyze_stock(ticker):
         reasons = []
 
         # =========================
-        # TREND STRUCTURE (HEAVY WEIGHT)
+        # TREND
         # =========================
         if ma5 > ma21 > ma50:
             score += 35
-            reasons.append("Strong bullish institutional trend (MA stack aligned)")
+            reasons.append("Güçlü yükseliş trendi (kurumsal MA uyumu)")
         elif ma5 > ma21:
             score += 20
-            reasons.append("Short-term bullish structure")
+            reasons.append("Kısa vadeli yükseliş trendi")
         else:
             score -= 25
-            reasons.append("Distribution / weak trend structure")
+            reasons.append("Zayıf trend / dağıtım bölgesi")
 
-        # long term trend confirmation
         if price > ma200:
             score += 15
-            reasons.append("Above 200 MA (macro uptrend)")
+            reasons.append("Ana trend (MA200) üzerinde – boğa piyasası yapısı")
         else:
             score -= 10
-            reasons.append("Below 200 MA (macro weakness)")
+            reasons.append("MA200 altında – makro zayıflık")
 
         # =========================
-        # RSI ZONES
+        # RSI
         # =========================
         if rsi_val < 30:
             score += 25
-            reasons.append("Oversold institutional accumulation zone")
+            reasons.append("Aşırı satım – kurumsal birikim bölgesi")
         elif rsi_val < 45:
             score += 10
-            reasons.append("Accumulative zone")
+            reasons.append("Birikim bölgesi")
         elif rsi_val > 70:
             score -= 25
-            reasons.append("Overbought profit-taking risk")
+            reasons.append("Aşırı alım – kâr realizasyonu riski")
 
         # =========================
-        # MOMENTUM vs MARKET
+        # MOMENTUM vs PİYASA
         # =========================
         if momentum_30 > spy:
             score += 25
-            reasons.append("Outperforming SPY (alpha generation)")
+            reasons.append("Piyasa üzerinde getiri (alfa üretiyor)")
         else:
             score -= 10
-            reasons.append("Underperforming market benchmark")
+            reasons.append("Piyasa endeksinin altında performans")
 
         # =========================
-        # MOMENTUM ACCELERATION
+        # MOMENTUM HIZLANMA
         # =========================
         if momentum_10 > momentum_30:
             score += 10
-            reasons.append("Momentum acceleration detected")
+            reasons.append("Momentum hızlanması tespit edildi")
 
         # =========================
-        # VOLATILITY RISK
+        # VOLATİLİTE
         # =========================
         if volatility < 0.02:
             score += 10
-            reasons.append("Low volatility institutional stability")
+            reasons.append("Düşük volatilite – kurumsal stabil yapı")
         elif volatility > 0.04:
             score -= 20
-            reasons.append("High volatility risk regime")
+            reasons.append("Yüksek riskli volatilite rejimi")
 
         # =========================
-        # PRICE ACTION QUALITY
+        # FİYAT KONUMU
         # =========================
         if price > ma50:
             score += 10
-            reasons.append("Price above mid-term trend (MA50 support)")
+            reasons.append("Orta vadeli trend (MA50) üzerinde")
 
         confidence = max(0, min(100, score))
 
@@ -143,5 +132,5 @@ def analyze_stock(ticker):
         }
 
     except Exception as e:
-        print("ERROR:", ticker, e)
+        print("HATA:", ticker, e)
         return None
