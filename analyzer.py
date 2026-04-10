@@ -15,24 +15,36 @@ def rsi(series, period=14):
 
 
 # =========================
-# BENCHMARK (SPY)
+# NEWS SENTIMENT (proxy - stable)
 # =========================
-def benchmark():
+def news_sentiment(ticker):
     try:
-        df = yf.download("SPY", period="1mo", interval="1d", progress=False)
-        return float(df["Close"].pct_change().mean())
+        news = yf.Ticker(ticker).news
+        if not news:
+            return 0
+
+        score = 0
+        for n in news[:5]:
+            title = n.get("title", "").lower()
+
+            if any(w in title for w in ["surge", "beat", "upgrade", "profit", "record"]):
+                score += 1
+            if any(w in title for w in ["fall", "miss", "downgrade", "loss"]):
+                score -= 1
+
+        return score
     except:
-        return 0.001
+        return 0
 
 
 # =========================
-# MAIN ANALYSIS ENGINE
+# ANALYSIS ENGINE v3
 # =========================
 def analyze_stock(ticker):
     try:
-        df = yf.download(ticker, period="9mo", interval="1d", progress=False)
+        df = yf.download(ticker, period="1y", interval="1d", progress=False)
 
-        if df is None or df.empty or len(df) < 80:
+        if df is None or df.empty or len(df) < 100:
             return None
 
         df["ma5"] = df["Close"].rolling(5).mean()
@@ -53,84 +65,75 @@ def analyze_stock(ticker):
 
         returns = df["Close"].pct_change().dropna()
 
-        volatility = float(np.std(returns))
-        momentum_10 = float(np.mean(returns[-10:]))
+        momentum_20 = float(np.mean(returns[-20:]))
         momentum_60 = float(np.mean(returns[-60:]))
 
-        spy = benchmark()
+        volatility = float(np.std(returns))
 
-        score = 55
+        news = news_sentiment(ticker)
+
+        score = 50
         reasons = []
 
         # =========================
-        # TREND STRUCTURE
+        # TREND
         # =========================
         if ma5 > ma21 > ma50:
             score += 30
-            reasons.append("Güçlü kurumsal yükseliş trendi (MA uyumu)")
-        elif ma5 > ma21:
-            score += 15
-            reasons.append("Kısa vadeli yükseliş trendi")
+            reasons.append("Güçlü kurumsal trend akışı")
         else:
-            score -= 20
-            reasons.append("Trend zayıf / dağıtım bölgesi")
+            score -= 15
 
         if price > ma200:
             score += 20
-            reasons.append("Uzun vadeli boğa piyasası yapısı (MA200 üstü)")
+            reasons.append("Makro boğa rejimi")
         else:
-            score -= 15
-            reasons.append("Makro trend zayıf (MA200 altı)")
+            score -= 10
 
         # =========================
-        # RSI LOGIC
+        # RSI
         # =========================
         if rsi_val < 30:
-            score += 25
-            reasons.append("Aşırı satım – akümülasyon bölgesi")
-        elif rsi_val < 45:
-            score += 10
-            reasons.append("Birikim bölgesi")
+            score += 20
+            reasons.append("Aşırı satım (birikim)")
         elif rsi_val > 70:
-            score -= 25
-            reasons.append("Aşırı alım – düzeltme riski")
+            score -= 20
+            reasons.append("Aşırı alım riski")
 
         # =========================
         # MOMENTUM
         # =========================
-        if momentum_60 > spy:
-            score += 25
-            reasons.append("Endeks üstü performans (alfa üretimi)")
+        if momentum_60 > 0:
+            score += 15
         else:
             score -= 10
-            reasons.append("Endeks altı performans")
-
-        if momentum_10 > momentum_60:
-            score += 10
-            reasons.append("Momentum hızlanması")
 
         # =========================
-        # VOLATILITY RISK
+        # NEWS FLOW
+        # =========================
+        if news > 0:
+            score += 20
+            reasons.append("Pozitif haber akışı")
+        elif news < 0:
+            score -= 20
+            reasons.append("Negatif haber akışı")
+
+        # =========================
+        # VOLATILITY
         # =========================
         if volatility < 0.02:
             score += 10
-            reasons.append("Düşük riskli volatilite rejimi")
+            reasons.append("Düşük risk rejimi")
         elif volatility > 0.04:
-            score -= 20
-            reasons.append("Yüksek volatilite – risk artışı")
+            score -= 15
+            reasons.append("Yüksek risk")
 
-        # =========================
-        # FINAL SCORE
-        # =========================
         confidence = max(0, min(100, score))
 
         return {
             "ticker": ticker,
             "price": price,
             "confidence": confidence,
-            "rsi": rsi_val,
-            "volatility": volatility,
-            "momentum": momentum_60,
             "reasons": reasons
         }
 
