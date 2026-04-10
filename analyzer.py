@@ -15,6 +15,7 @@ def analyze_stock(ticker, buy_price=None):
         current_price = close.iloc[-1]
 
         score = 0
+        max_score = 8
         reasons = []
 
         # =====================
@@ -89,13 +90,18 @@ def analyze_stock(ticker, buy_price=None):
                 return f"💰 {ticker} → TAKE PROFIT SELL (+{round(change_pct,2)}%)"
 
         # =====================
-        # 🎯 KARAR
+        # 🎯 CONFIDENCE
+        # =====================
+        confidence = round((abs(score) / max_score) * 100, 1)
+
+        # =====================
+        # 📢 KARAR
         # =====================
         if score >= 4:
-            return f"🔥 {ticker} → STRONG BUY (Score: {score})"
+            return f"🔥 {ticker} → STRONG BUY | Score: {score} | Confidence: %{confidence}"
 
         elif score <= -4:
-            return f"🚨 {ticker} → STRONG SELL (Score: {score})"
+            return f"🚨 {ticker} → STRONG SELL | Score: {score} | Confidence: %{confidence}"
 
         return None
 
