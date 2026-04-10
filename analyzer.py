@@ -52,13 +52,16 @@ def compute_rsi(series, period=14):
 # =========================
 def compute_win_rate(close):
     try:
-        if close is None or len(close) < 20:
+        if close is None or len(close) < 30:
             return 50
 
         future = close.shift(-5)
         returns = close.pct_change()
 
         valid = (returns > 0) & (future.pct_change() > 0)
+
+        if len(valid) == 0:
+            return 50
 
         return int((valid.sum() / len(close)) * 100)
 
@@ -67,25 +70,38 @@ def compute_win_rate(close):
 
 
 # =========================
-# MAIN ANALYZER
+# ANALYZE STOCK
 # =========================
 def analyze_stock(ticker):
 
     try:
         df = yf.download(
             ticker,
-            period="6mo",
+            period="1y",
             interval="1d",
             progress=False,
-            threads=False
+            threads=False,
+            auto_adjust=False
         )
 
-        if df is None or df.empty or len(df) < 60:
+        # =========================
+        # DATA CHECK
+        # =========================
+        if df is None or df.empty:
+            return None
+
+        if "Close" not in df:
             return None
 
         close = df["Close"]
         volume = df["Volume"]
 
+        if len(close.dropna()) < 30:
+            return None
+
+        # =========================
+        # VALUES
+        # =========================
         price = safe(close)
 
         if price is None:
@@ -102,10 +118,13 @@ def analyze_stock(ticker):
 
         win_rate = compute_win_rate(close)
 
+        # =========================
+        # SCORE ENGINE
+        # =========================
         score = 0
         reasons = []
 
-        # TREND
+        # Trend
         if ma20 and price > ma20:
             score += 10
             reasons.append("MA20 üstü")
@@ -126,28 +145,32 @@ def analyze_stock(ticker):
             score -= 10
             reasons.append("RSI overbought")
 
-        # VOLUME
+        # Volume
         if vol and vol_ma and vol > vol_ma:
             score += 10
             reasons.append("Hacim artışı")
 
-        # VOLATILITY SAFE
+        # Volatility
         try:
             returns = close.pct_change().dropna()
-            volatility = np.std(returns) * 100
-
-            if volatility < 2:
-                score += 10
-                reasons.append("Düşük volatilite")
+            if len(returns) > 10:
+                volatility = np.std(returns) * 100
+                if volatility < 2:
+                    score += 10
+                    reasons.append("Düşük volatilite")
         except:
             pass
 
-        # PRICE COMPRESSION
-        if ma20 and abs(price - ma20) / price < 0.03:
-            score += 10
-            reasons.append("Sıkışma")
+        # Compression
+        if ma20 and price:
+            if abs(price - ma20) / price < 0.03:
+                score += 10
+                reasons.append("Sıkışma")
 
         score = max(5, min(100, score))
+
+        if not reasons:
+            reasons = ["Nötr"]
 
         return {
             "ticker": ticker,
