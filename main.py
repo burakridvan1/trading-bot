@@ -1,195 +1,160 @@
-import yfinance as yf
-import numpy as np
-import pandas as pd
-import time
+import asyncio
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+from analyzer import analyze_stock
+from config import TELEGRAM_TOKEN, CHAT_ID
 
 
 # =========================
-# SAFE VALUE
+# SECTORS
 # =========================
-def safe(series):
-    try:
-        if series is None:
-            return None
+SECTORS = {
+    "TEKNOLOJİ": ["AAPL", "MSFT", "NVDA", "ADBE"],
+    "FİNANS": ["JPM", "BAC", "GS"],
+    "SAĞLIK": ["JNJ", "PFE", "MRK"],
+    "ENERJİ": ["XOM", "CVX"],
+    "TÜKETİM": ["AMZN", "COST", "WMT"]
+}
 
-        if isinstance(series, pd.Series):
-            series = series.dropna()
-            if len(series) == 0:
-                return None
-            return float(series.iloc[-1])
-
-        return float(series)
-    except:
-        return None
-
-
-# =========================
-# TICKER FIX (ÇOK ÖNEMLİ)
-# =========================
-def normalize_ticker(ticker):
-    return ticker.upper().replace(".", "-")
+UNIVERSE = [
+    t.upper().replace(".", "-")
+    for s in SECTORS.values()
+    for t in s
+]
 
 
 # =========================
-# YFINANCE SAFE DOWNLOAD (RETRY)
+# START
 # =========================
-def get_data(ticker, retries=3):
-    ticker = normalize_ticker(ticker)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("START COMMAND RECEIVED")
+    await update.message.reply_text(
+        "✅ HEDGE FUND AI AKTİF\n\n"
+        "/analyze TSLA\n"
+        "/top5 → En güçlü hisseler"
+    )
 
-    for _ in range(retries):
+
+# =========================
+# ANALYZE SINGLE STOCK
+# =========================
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.args:
+        await update.message.reply_text("Kullanım: /analyze TSLA")
+        return
+
+    ticker = context.args[0].upper().replace(".", "-")
+
+    r = analyze_stock(ticker)
+
+    if not r:
+        await update.message.reply_text("❌ Veri alınamadı (ticker hatalı veya API boş)")
+        return
+
+    msg = f"📊 {r['ticker']}\n"
+    msg += f"💰 Price: {r['price']:.2f}\n"
+    msg += f"🧠 Score: %{r['confidence']}\n"
+    msg += f"🎯 Win Rate: %{r['win_rate']}\n\n"
+
+    for reason in r["reasons"]:
+        msg += f"• {reason}\n"
+
+    await update.message.reply_text(msg)
+
+
+# =========================
+# TOP 5
+# =========================
+async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text("📊 Market scan başlatıldı...")
+
+    results = []
+
+    for t in UNIVERSE:
         try:
-            df = yf.download(
-                ticker,
-                period="6mo",
-                interval="1d",
-                progress=False,
-                threads=False,
-                auto_adjust=False
-            )
+            r = analyze_stock(t)
+            if r:
+                results.append(r)
+        except Exception as e:
+            print("ERROR:", t, e)
 
-            if df is not None and not df.empty:
-                return df
+    if len(results) == 0:
+        await update.message.reply_text("❌ Veri alınamadı (yfinance / network sorunu)")
+        return
+
+    results = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+
+    msg = "🏆 HEDGE FUND TOP 5\n\n"
+
+    for r in results:
+        msg += f"{r['ticker']}\n"
+        msg += f"💰 {r['price']:.2f}\n"
+        msg += f"🧠 %{r['confidence']} | 🎯 {r['win_rate']}%\n\n"
+
+    await update.message.reply_text(msg)
+
+
+# =========================
+# AUTO SIGNAL ENGINE
+# =========================
+async def auto_engine(app):
+
+    while True:
+        try:
+            results = []
+
+            for t in UNIVERSE:
+                r = analyze_stock(t)
+                if r:
+                    results.append(r)
+
+            if results:
+                top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:3]
+
+                msg = "🚨 AUTO SIGNAL\n\n"
+
+                for r in top:
+                    msg += f"{r['ticker']} → %{r['confidence']} | 🎯 {r['win_rate']}%\n"
+
+                await app.bot.send_message(
+                    chat_id=CHAT_ID,
+                    text=msg
+                )
 
         except Exception as e:
-            print("DOWNLOAD ERROR:", ticker, e)
+            print("AUTO ENGINE ERROR:", e)
 
-        time.sleep(0.5)
-
-    return None
+        await asyncio.sleep(21600)  # 6 saat
 
 
 # =========================
-# RSI
+# MAIN (STABLE VERSION)
 # =========================
-def compute_rsi(series, period=14):
-    try:
-        delta = series.diff()
-        gain = delta.clip(lower=0).rolling(period).mean()
-        loss = -delta.clip(upper=0).rolling(period).mean()
+def main():
 
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
+    print("BOT STARTING...")
 
-        rsi = rsi.dropna()
-        if len(rsi) == 0:
-            return 50
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-        return float(rsi.iloc[-1])
-    except:
-        return 50
+    # handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("analyze", analyze))
+    app.add_handler(CommandHandler("top5", top5))
 
+    # background engine
+    async def post_init(application):
+        print("AUTO ENGINE STARTED")
+        asyncio.create_task(auto_engine(application))
 
-# =========================
-# WIN RATE (basit proxy)
-# =========================
-def compute_win_rate(close):
-    try:
-        future = close.pct_change().shift(-5)
-        signals = close.pct_change()
+    app.post_init = post_init
 
-        wins = ((signals > 0) & (future > 0)).sum()
-        total = len(close)
+    print("BOT READY - polling started")
 
-        if total == 0:
-            return 50
-
-        return int((wins / total) * 100)
-    except:
-        return 50
+    app.run_polling()
 
 
-# =========================
-# MAIN ANALYSIS
-# =========================
-def analyze_stock(ticker):
-
-    df = get_data(ticker)
-
-    if df is None:
-        print("NO DATA:", ticker)
-        return None
-
-    close = df["Close"]
-    volume = df["Volume"]
-
-    price = safe(close)
-    if price is None:
-        return None
-
-    ma20 = safe(close.rolling(20).mean())
-    ma50 = safe(close.rolling(50).mean())
-    ma200 = safe(close.rolling(200).mean())
-
-    rsi = compute_rsi(close)
-
-    vol = safe(volume)
-    vol_ma = safe(volume.rolling(20).mean())
-
-    win_rate = compute_win_rate(close)
-
-    score = 0
-    reasons = []
-
-    # =========================
-    # TREND
-    # =========================
-    if ma20 and price > ma20:
-        score += 10
-        reasons.append("MA20 üstü")
-
-    if ma20 and ma50 and ma20 > ma50:
-        score += 15
-        reasons.append("Trend güçlü")
-
-    if ma50 and ma200 and ma50 > ma200:
-        score += 20
-        reasons.append("Uzun trend güçlü")
-
-    # =========================
-    # RSI
-    # =========================
-    if rsi < 30:
-        score += 15
-        reasons.append("RSI oversold")
-    elif rsi > 70:
-        score -= 10
-        reasons.append("RSI overbought")
-
-    # =========================
-    # VOLUME
-    # =========================
-    if vol and vol_ma and vol > vol_ma:
-        score += 10
-        reasons.append("Hacim artışı")
-
-    # =========================
-    # VOLATILITY
-    # =========================
-    returns = close.pct_change().dropna()
-    if len(returns) > 10:
-        volatility = np.std(returns.values) * 100
-        if volatility < 2:
-            score += 10
-            reasons.append("Düşük volatilite")
-
-    # =========================
-    # COMPRESSION
-    # =========================
-    if ma20:
-        if abs(price - ma20) / price < 0.03:
-            score += 10
-            reasons.append("Sıkışma")
-
-    score = max(5, min(100, score))
-
-    if not reasons:
-        reasons.append("Nötr")
-
-    return {
-        "ticker": ticker,
-        "price": price,
-        "confidence": score,
-        "rsi": rsi,
-        "win_rate": win_rate,
-        "reasons": reasons
-    }
+if __name__ == "__main__":
+    main()
