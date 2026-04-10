@@ -1,5 +1,4 @@
 import asyncio
-import nest_asyncio
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from telegram import Update
@@ -13,8 +12,6 @@ from portfolio_manager import (
     list_portfolio
 )
 
-nest_asyncio.apply()
-
 app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 sent_signals = set()
 
@@ -26,7 +23,6 @@ sent_signals = set()
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 Bot aktif!\n\n"
-        "Komutlar:\n"
         "/ekle TSLA 250\n"
         "/sil TSLA\n"
         "/liste"
@@ -62,7 +58,9 @@ async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def get_all_tickers():
     try:
-        sp500 = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]['Symbol'].tolist()
+        sp500 = pd.read_html(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        )[0]['Symbol'].tolist()
         return list(set(sp500))
     except:
         return []
@@ -72,7 +70,7 @@ def get_all_tickers():
 # 🔍 SCAN
 # =========================
 
-async def scan_market():
+async def scan_market(context: ContextTypes.DEFAULT_TYPE):
     tickers = get_all_tickers()
     portfolio = load_portfolio()
 
@@ -105,80 +103,64 @@ async def scan_market():
 
     if messages:
         for m in messages[:20]:
-            await app.bot.send_message(chat_id=config.CHAT_ID, text=m)
+            await context.bot.send_message(chat_id=config.CHAT_ID, text=m)
     else:
-        await app.bot.send_message(chat_id=config.CHAT_ID, text="Sinyal yok.")
+        await context.bot.send_message(chat_id=config.CHAT_ID, text="Sinyal yok.")
 
 
 # =========================
 # 🏆 TOP 5
 # =========================
 
-async def top5_loop():
-    while True:
-        tickers = get_all_tickers()
+async def send_top5(context: ContextTypes.DEFAULT_TYPE):
+    tickers = get_all_tickers()
 
-        loop = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()
 
-        with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
-            tasks = [
-                loop.run_in_executor(executor, analyze_stock, t, None)
-                for t in tickers
-            ]
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
+        tasks = [
+            loop.run_in_executor(executor, analyze_stock, t, None)
+            for t in tickers
+        ]
 
-            results = await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
 
-        candidates = []
+    candidates = []
 
-        for res in results:
-            if isinstance(res, dict) and res.get("type") == "BUY":
-                if res["confidence"] >= 70:
-                    candidates.append(res)
+    for res in results:
+        if isinstance(res, dict) and res.get("type") == "BUY":
+            if res["confidence"] >= 70:
+                candidates.append(res)
 
-        if candidates:
-            top = sorted(candidates, key=lambda x: x["confidence"], reverse=True)[:5]
+    if candidates:
+        top = sorted(candidates, key=lambda x: x["confidence"], reverse=True)[:5]
 
-            msg = "🏆 TOP 5 FIRSAT:\n\n"
-            for i, t in enumerate(top, 1):
-                msg += f"{i}. {t['ticker']} → Score: {t['score']} | %{t['confidence']}\n"
+        msg = "🏆 TOP 5 FIRSAT:\n\n"
+        for i, t in enumerate(top, 1):
+            msg += f"{i}. {t['ticker']} → Score: {t['score']} | %{t['confidence']}\n"
 
-            await app.bot.send_message(chat_id=config.CHAT_ID, text=msg)
-
-        await asyncio.sleep(6 * 60 * 60)
+        await context.bot.send_message(chat_id=config.CHAT_ID, text=msg)
 
 
 # =========================
-# 🔁 LOOP
+# 🚀 MAIN (TEK DOĞRU)
 # =========================
 
-async def scan_loop():
-    while True:
-        await scan_market()
-        await asyncio.sleep(config.SCAN_INTERVAL_MINUTES * 60)
-
-
-# =========================
-# 🚀 MAIN (EN KRİTİK KISIM)
-# =========================
-
-async def main():
+def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ekle", ekle))
     app.add_handler(CommandHandler("sil", sil))
     app.add_handler(CommandHandler("liste", liste))
 
-    # 🔥 DOĞRU BAŞLATMA
-    await app.initialize()
-    await app.start()
-    await app.bot.initialize()
+    # ⏱️ scheduler
+    app.job_queue.run_repeating(scan_market, interval=config.SCAN_INTERVAL_MINUTES * 60, first=10)
+    app.job_queue.run_repeating(send_top5, interval=6 * 60 * 60, first=20)
 
-    # looplar
-    asyncio.create_task(scan_loop())
-    asyncio.create_task(top5_loop())
+    print("✅ Bot çalışıyor...")
 
-    # ❗ KRİTİK SATIR
-    await app.run_polling()
+    # 🔥 SADECE BU
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
