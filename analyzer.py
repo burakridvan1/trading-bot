@@ -33,12 +33,9 @@ def compute_rsi(series, period=14):
         return 50
 
 
-# =========================
-# BAŞARI ORANI (WIN RATE)
-# =========================
 def compute_win_rate(close):
     try:
-        future_returns = close.pct_change().shift(-5)  # 5 gün sonrası
+        future_returns = close.pct_change().shift(-5)
         signals = close.pct_change()
 
         wins = ((signals > 0) & (future_returns > 0)).sum()
@@ -52,9 +49,6 @@ def compute_win_rate(close):
         return 50
 
 
-# =========================
-# ANALYZER
-# =========================
 def analyze_stock(ticker):
 
     try:
@@ -90,15 +84,15 @@ def analyze_stock(ticker):
         score = 0
         reasons = []
 
-        if ma20 and price > ma20:
+        if ma20 is not None and price > ma20:
             score += 10
             reasons.append("MA20 üstü")
 
-        if ma20 and ma50 and ma20 > ma50:
+        if ma20 is not None and ma50 is not None and ma20 > ma50:
             score += 15
             reasons.append("Trend güçlü")
 
-        if ma50 and ma200 and ma50 > ma200:
+        if ma50 is not None and ma200 is not None and ma50 > ma200:
             score += 20
             reasons.append("Uzun trend güçlü")
 
@@ -109,7 +103,7 @@ def analyze_stock(ticker):
             score -= 10
             reasons.append("RSI yüksek")
 
-        if vol and vol_ma and vol > vol_ma:
+        if vol is not None and vol_ma is not None and vol > vol_ma:
             score += 10
             reasons.append("Hacim artışı")
 
@@ -120,7 +114,7 @@ def analyze_stock(ticker):
                 score += 10
                 reasons.append("Düşük volatilite")
 
-        if ma20:
+        if ma20 is not None:
             if abs(price - ma20) / price < 0.03:
                 score += 10
                 reasons.append("Sıkışma")
