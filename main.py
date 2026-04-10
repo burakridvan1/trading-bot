@@ -11,10 +11,10 @@ from config import TELEGRAM_TOKEN, CHAT_ID
 # =========================
 SECTORS = {
     "TEKNOLOJİ": ["AAPL","MSFT","NVDA","AVGO","ORCL","ADBE","CRM","AMD","CSCO",
-        "ACN","TXN","QCOM","AMAT","INTU","IBM","MU","LRCX","NOW","ADI","KLAC","PANW","SNPS","CDNS","APH"],
+        "ACN","TXN","QCOM","AMAT","INTU","IBM","MU","LRCX","NOW","ADI","KLAC","PANW","SNPS","CDNS","APH","SNDK"],
 
-    "FİNANS": ["BRK.B","JPM","V","MA","BAC","MS","GS","WFC","AXP","BLK",
-        "SPGI","C","PGR","MMC","CB","AON","MET","USB","PNC","COF","BK"],
+    "FİNANS": ["JPM","V","MA","BAC","MS","GS","WFC","AXP","BLK",
+        "SPGI","C","PGR","CB","AON","MET","USB","PNC","COF","BK"],
 
     "SAĞLIK": ["LLY","UNH","JNJ","ABBV","MRK","TMO","ABT","DHR","PFE","AMGN",
         "ISRG","SYK","ELV","VRTX","CI","REGN","BSX","GILD","BMY","MDT"],
