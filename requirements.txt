@@ -1,6 +1,7 @@
-python-telegram-bot==20.4
-apscheduler==3.11.0
 yfinance
 pandas
-numpy
+ta
+python-telegram-bot==20.3
 nest_asyncio
+lxml
+html5lib
