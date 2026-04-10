@@ -1,4 +1,3 @@
-import asyncio
 import pandas as pd
 
 from telegram import Update
@@ -16,9 +15,9 @@ app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏦 INSTITUTIONAL QUANT SYSTEM ACTIVE\n\n"
-        "/top5 → Best institutional opportunities\n"
-        "System scans US equities + ranks alpha opportunities"
+        "🏦 KURUMSAL QUANT SİSTEM AKTİF\n\n"
+        "/top5 → En güçlü yatırım fırsatları\n"
+        "Sistem ABD hisselerini analiz eder ve kurumsal skor üretir"
     )
 
 
@@ -35,10 +34,10 @@ def get_tickers():
 
 
 # =========================
-# TOP 5 ENGINE (NO EMPTY SIGNALS EVER)
+# TOP 5
 # =========================
 async def top5(update, context):
-    await update.message.reply_text("Scanning institutional universe...")
+    await update.message.reply_text("📊 Piyasalar taranıyor... kurumsal analiz çalışıyor")
 
     tickers = get_tickers()
     results = []
@@ -52,13 +51,13 @@ async def top5(update, context):
 
     top = results[:5]
 
-    msg = "🏆 INSTITUTIONAL TOP 5 OPPORTUNITIES\n\n"
+    msg = "🏆 EN GÜÇLÜ 5 YATIRIM FIRSATI\n\n"
 
     for i, s in enumerate(top, 1):
         msg += f"{i}. {s['ticker']}\n"
-        msg += f"💰 Price: {s['price']:.2f}\n"
-        msg += f"🧠 Confidence: %{s['confidence']:.1f}\n"
-        msg += "📌 Thesis:\n"
+        msg += f"💰 Fiyat: {s['price']:.2f}\n"
+        msg += f"🧠 Güven Skoru: %{s['confidence']:.1f}\n"
+        msg += "📌 Analiz:\n"
 
         for r in s["reasons"]:
             msg += f" - {r}\n"
