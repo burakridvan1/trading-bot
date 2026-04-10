@@ -2,46 +2,29 @@ import asyncio
 import nest_asyncio
 from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
-from telegram import Update, Bot
+from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import config
 from analyzer import analyze_stock
-from portfolio_manager import add_stock, remove_stock, list_portfolio, load_portfolio
+from portfolio_manager import load_portfolio
 
 nest_asyncio.apply()
 
+app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 sent_signals = set()
 
-# TELEGRAM APP
-app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
+
+async def send(msg):
+    await app.bot.send_message(chat_id=config.CHAT_ID, text=msg)
 
 
-# 📩 KOMUTLAR
-async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        ticker = context.args[0]
-        price = float(context.args[1])
-        msg = add_stock(ticker, price)
-        await update.message.reply_text(msg)
-    except:
-        await update.message.reply_text("Kullanım: /ekle TSLA 250")
-
-
-async def sil(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        ticker = context.args[0]
-        msg = remove_stock(ticker)
-        await update.message.reply_text(msg)
-    except:
-        await update.message.reply_text("Kullanım: /sil TSLA")
-
-
+# KOMUTLAR (aynı kalıyor)
 async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = list_portfolio()
-    await update.message.reply_text(msg)
+    from portfolio_manager import list_portfolio
+    await update.message.reply_text(list_portfolio())
 
 
-# 📊 TICKER
+# TICKER
 def get_all_tickers():
     try:
         sp500 = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]['Symbol'].tolist()
@@ -50,56 +33,75 @@ def get_all_tickers():
         return []
 
 
-# 🔍 MARKET SCAN
-async def scan_market(bot: Bot):
+# SCAN
+async def scan_market():
     tickers = get_all_tickers()
     portfolio = load_portfolio()
 
     loop = asyncio.get_event_loop()
-    results = []
 
     with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
-        tasks = []
+        tasks = [
+            loop.run_in_executor(executor, analyze_stock, t, None)
+            for t in tickers
+        ]
 
-        # Market
-        for ticker in tickers:
-            tasks.append(loop.run_in_executor(executor, analyze_stock, ticker, None))
+        # portföy ayrı
+        for t, p in portfolio.items():
+            tasks.append(loop.run_in_executor(executor, analyze_stock, t, p))
 
-        # Portfolio
-        for ticker, price in portfolio.items():
-            tasks.append(loop.run_in_executor(executor, analyze_stock, ticker, price))
+        results = await asyncio.gather(*tasks)
 
-        completed = await asyncio.gather(*tasks)
+    top_candidates = []
+    normal_signals = []
 
-    for res in completed:
-        if res and res not in sent_signals:
-            results.append(res)
-            sent_signals.add(res)
+    for res in results:
+        if not res:
+            continue
 
-    if results:
-        for r in results[:25]:
-            await bot.send_message(chat_id=config.CHAT_ID, text=r)
-    else:
-        await bot.send_message(chat_id=config.CHAT_ID, text="Sinyal yok.")
+        if isinstance(res, dict):
+
+            # STOP / TP
+            if res.get("type") in ["STOP", "TP"]:
+                await send(res["msg"])
+
+            # BUY adayları
+            elif res.get("type") == "BUY":
+                if res["confidence"] >= 70:
+                    top_candidates.append(res)
+
+            # SELL
+            elif res.get("type") == "SELL":
+                normal_signals.append(res["msg"])
+
+    # TOP 5
+    if top_candidates:
+        top_candidates = sorted(top_candidates, key=lambda x: x["confidence"], reverse=True)[:5]
+
+        msg = "🏆 TOP 5 FIRSAT:\n"
+        for i, t in enumerate(top_candidates, 1):
+            msg += f"{i}. {t['ticker']} → Score: {t['score']} | %{t['confidence']}\n"
+
+        await send(msg)
+
+    elif not normal_signals:
+        await send("Sinyal yok.")
 
 
-# 🔁 LOOP
-async def periodic_scan(app):
+# LOOP
+async def loop():
     while True:
-        await scan_market(app.bot)
+        await scan_market()
         await asyncio.sleep(config.SCAN_INTERVAL_MINUTES * 60)
 
 
-# 🚀 MAIN
 async def main():
-    app.add_handler(CommandHandler("ekle", ekle))
-    app.add_handler(CommandHandler("sil", sil))
     app.add_handler(CommandHandler("liste", liste))
 
     await app.initialize()
     await app.start()
 
-    asyncio.create_task(periodic_scan(app))
+    asyncio.create_task(loop())
 
     await app.updater.start_polling()
 
