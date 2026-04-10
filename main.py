@@ -1,127 +1,138 @@
-import asyncio
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
-from analyzer import analyze_stock
-from config import TELEGRAM_TOKEN, CHAT_ID
+import yfinance as yf
+import numpy as np
+import pandas as pd
 
 
-SECTORS = {
-    "TEKNOLOJİ": ["AAPL","MSFT","NVDA","ADBE"],
-    "FİNANS": ["JPM","BAC","GS"],
-    "SAĞLIK": ["JNJ","PFE","MRK"],
-    "ENERJİ": ["XOM","CVX"],
-    "TÜKETİM": ["AMZN","COST","WMT"]
-}
-
-UNIVERSE = [t for s in SECTORS.values() for t in s]
-
-
-# =========================
-# START
-# =========================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot aktif!")
+def safe(series):
+    try:
+        if isinstance(series, pd.Series):
+            series = series.dropna()
+            if len(series) == 0:
+                return None
+            return float(series.iloc[-1])
+        return float(series)
+    except:
+        return None
 
 
-# =========================
-# ANALYZE
-# =========================
-async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def compute_rsi(series, period=14):
+    try:
+        delta = series.diff()
+        gain = delta.clip(lower=0).rolling(period).mean()
+        loss = -delta.clip(upper=0).rolling(period).mean()
 
-    if not context.args:
-        await update.message.reply_text("Kullanım: /analyze TSLA")
-        return
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
 
-    ticker = context.args[0].upper()
-    r = analyze_stock(ticker)
+        rsi = rsi.dropna()
+        if len(rsi) == 0:
+            return 50
 
-    if not r:
-        await update.message.reply_text("Veri alınamadı")
-        return
-
-    msg = f"{ticker}\n%{r['confidence']} 🎯{r['win_rate']}%"
-    await update.message.reply_text(msg)
+        return float(rsi.iloc[-1])
+    except:
+        return 50
 
 
-# =========================
-# TOP5
-# =========================
-async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def compute_win_rate(close):
+    try:
+        future_returns = close.pct_change().shift(-5)
+        signals = close.pct_change()
 
-    await update.message.reply_text("Analiz yapılıyor...")
+        wins = ((signals > 0) & (future_returns > 0)).sum()
+        total = len(close)
 
-    results = []
+        if total == 0:
+            return 50
 
-    for t in UNIVERSE:
-        r = analyze_stock(t)
-        if r:
-            results.append(r)
-
-    if len(results) == 0:
-        await update.message.reply_text("⚠️ Veri yok (API problem olabilir)")
-        return
-
-    results = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
-
-    msg = "TOP 5\n\n"
-
-    for r in results:
-        msg += f"{r['ticker']} %{r['confidence']} 🎯{r['win_rate']}%\n"
-
-    await update.message.reply_text(msg)
+        return int((wins / total) * 100)
+    except:
+        return 50
 
 
-# =========================
-# AUTO ENGINE (THREAD SAFE)
-# =========================
-async def auto_engine(app):
-    while True:
-        try:
-            results = []
+def analyze_stock(ticker):
 
-            for t in UNIVERSE:
-                r = analyze_stock(t)
-                if r:
-                    results.append(r)
+    try:
+        df = yf.download(
+            ticker,
+            period="6mo",
+            interval="1d",
+            progress=False,
+            threads=False
+        )
 
-            if results:
-                top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:3]
+        if df is None or df.empty:
+            return None
 
-                msg = "🚨 SİNYAL\n\n"
-                for r in top:
-                    msg += f"{r['ticker']} %{r['confidence']} 🎯{r['win_rate']}%\n"
+        close = df["Close"]
+        volume = df["Volume"]
 
-                await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+        price = safe(close)
+        if price is None:
+            return None
 
-        except Exception as e:
-            print("AUTO ERROR:", e)
+        ma20 = safe(close.rolling(20).mean())
+        ma50 = safe(close.rolling(50).mean())
+        ma200 = safe(close.rolling(200).mean())
 
-        await asyncio.sleep(21600)
+        rsi = compute_rsi(close)
 
+        vol = safe(volume)
+        vol_ma = safe(volume.rolling(20).mean())
 
-# =========================
-# MAIN
-# =========================
-async def main():
+        win_rate = compute_win_rate(close)
 
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+        score = 0
+        reasons = []
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("top5", top5))
-    app.add_handler(CommandHandler("analyze", analyze))
+        if ma20 is not None and price > ma20:
+            score += 10
+            reasons.append("MA20 üstü")
 
-    # 🔥 KRİTİK: bot başladıktan sonra engine başlat
-    async def run():
-        await app.initialize()
-        await app.start()
+        if ma20 is not None and ma50 is not None and ma20 > ma50:
+            score += 15
+            reasons.append("Trend güçlü")
 
-        asyncio.create_task(auto_engine(app))
+        if ma50 is not None and ma200 is not None and ma50 > ma200:
+            score += 20
+            reasons.append("Uzun trend güçlü")
 
-        await app.updater.start_polling()
+        if rsi < 30:
+            score += 15
+            reasons.append("RSI düşük")
+        elif rsi > 70:
+            score -= 10
+            reasons.append("RSI yüksek")
 
-    await run()
+        if vol is not None and vol_ma is not None and vol > vol_ma:
+            score += 10
+            reasons.append("Hacim artışı")
 
+        returns = close.pct_change().dropna()
+        if len(returns) > 10:
+            volatility = np.std(returns.values) * 100
+            if volatility < 2:
+                score += 10
+                reasons.append("Düşük volatilite")
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        if ma20 is not None:
+            if abs(price - ma20) / price < 0.03:
+                score += 10
+                reasons.append("Sıkışma")
+
+        score = max(5, min(100, score))
+
+        if not reasons:
+            reasons.append("Nötr")
+
+        return {
+            "ticker": ticker,
+            "price": price,
+            "confidence": score,
+            "rsi": rsi,
+            "win_rate": win_rate,
+            "reasons": reasons
+        }
+
+    except Exception as e:
+        print("ERROR:", ticker, e)
+        return None
