@@ -19,11 +19,11 @@ app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
 
 # =========================
-# TELEGRAM COMMANDS
+# COMMANDS
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 Bot aktif! Tarama başladı.")
+    await update.message.reply_text("🤖 Hedge Fund Bot Aktif!")
 
 
 async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -48,7 +48,7 @@ async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# ALL US STOCKS (S&P500)
+# ALL TICKERS (S&P500)
 # =========================
 
 def get_all_tickers():
@@ -61,6 +61,41 @@ def get_all_tickers():
 
 
 # =========================
+# TOP 5 COMMAND (LIVE SCAN)
+# =========================
+
+async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 Hedge Fund Top 5 hesaplanıyor...")
+
+    tickers = get_all_tickers()
+    results = []
+
+    for t in tickers:
+        r = analyze_stock(t, None)
+
+        if r and r.get("type") == "BUY":
+            results.append(r)
+
+    top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+
+    if not top:
+        await update.message.reply_text("❌ Uygun fırsat yok")
+        return
+
+    msg = "🏆 HEDGE FUND TOP 5\n\n"
+
+    for i, t in enumerate(top, 1):
+        msg += (
+            f"{i}. {t['ticker']}\n"
+            f"   💰 {t['price']:.2f}\n"
+            f"   🧠 Confidence: %{t['confidence']}\n"
+            f"   📊 MA5 > MA21: {t['ma5'] > t['ma21']}\n\n"
+        )
+
+    await update.message.reply_text(msg)
+
+
+# =========================
 # MARKET SCANNER LOOP
 # =========================
 
@@ -68,41 +103,29 @@ def scan_loop():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    sent_signals = set()
+    sent = set()
 
     while True:
         try:
             tickers = get_all_tickers()
             portfolio = load_portfolio()
 
-            messages = []
+            msgs = []
 
-            # ALL MARKET SCAN
             for t in tickers:
-                result = analyze_stock(t, None)
+                r = analyze_stock(t, None)
 
-                if isinstance(result, dict):
-                    if result.get("type") in ["BUY", "SELL", "STOP", "TP"]:
-                        messages.append(result["msg"])
-                elif result:
-                    if result not in sent_signals:
-                        messages.append(result)
-                        sent_signals.add(result)
+                if r and r.get("type") in ["BUY", "SELL"]:
+                    msgs.append(r["msg"])
 
-            # PORTFOLIO SCAN
-            for t, price in portfolio.items():
-                result = analyze_stock(t, price)
+            for t, p in portfolio.items():
+                r = analyze_stock(t, p)
+                if r:
+                    msgs.append(r["msg"])
 
-                if isinstance(result, dict):
-                    messages.append(result["msg"])
-
-            # SEND TELEGRAM (limit 20 msg per cycle)
-            for msg in messages[:20]:
+            for m in msgs[:15]:
                 loop.run_until_complete(
-                    app.bot.send_message(
-                        chat_id=config.CHAT_ID,
-                        text=msg
-                    )
+                    app.bot.send_message(chat_id=config.CHAT_ID, text=m)
                 )
 
             time.sleep(config.SCAN_INTERVAL_MINUTES * 60)
@@ -113,7 +136,7 @@ def scan_loop():
 
 
 # =========================
-# TOP 5 LOOP (EVERY 6 HOURS)
+# TOP5 AUTO LOOP (6H)
 # =========================
 
 def top5_loop():
@@ -127,28 +150,18 @@ def top5_loop():
 
             for t in tickers:
                 r = analyze_stock(t, None)
+                if r and r.get("type") == "BUY":
+                    results.append(r)
 
-                if isinstance(r, dict):
-                    if r.get("type") == "BUY" and r.get("confidence", 0) >= 70:
-                        results.append(r)
+            top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
 
-            top5 = sorted(
-                results,
-                key=lambda x: x["confidence"],
-                reverse=True
-            )[:5]
-
-            if top5:
-                msg = "🏆 TOP 5 FIRSAT\n\n"
-
-                for i, t in enumerate(top5, 1):
+            if top:
+                msg = "🏆 AUTO TOP 5\n\n"
+                for i, t in enumerate(top, 1):
                     msg += f"{i}. {t['ticker']} → %{t['confidence']}\n"
 
                 loop.run_until_complete(
-                    app.bot.send_message(
-                        chat_id=config.CHAT_ID,
-                        text=msg
-                    )
+                    app.bot.send_message(chat_id=config.CHAT_ID, text=msg)
                 )
 
             time.sleep(6 * 60 * 60)
@@ -162,7 +175,7 @@ def top5_loop():
 # START THREADS
 # =========================
 
-def start_background_tasks():
+def start_background():
     threading.Thread(target=scan_loop, daemon=True).start()
     threading.Thread(target=top5_loop, daemon=True).start()
 
@@ -176,10 +189,10 @@ def main():
     app.add_handler(CommandHandler("ekle", ekle))
     app.add_handler(CommandHandler("sil", sil))
     app.add_handler(CommandHandler("liste", liste))
+    app.add_handler(CommandHandler("top5", top5))
 
-    start_background_tasks()
+    start_background()
 
-    # STABLE START (IMPORTANT)
     app.run_polling()
 
 
