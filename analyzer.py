@@ -15,78 +15,68 @@ def rsi(series, period=14):
 
 
 # =========================
-# NEWS SENTIMENT (proxy - stable)
+# SMART MONEY PROXY (volume spike)
 # =========================
-def news_sentiment(ticker):
+def volume_score(df):
     try:
-        news = yf.Ticker(ticker).news
-        if not news:
+        if "Volume" not in df:
             return 0
 
-        score = 0
-        for n in news[:5]:
-            title = n.get("title", "").lower()
+        avg = df["Volume"].rolling(20).mean().iloc[-1]
+        last = df["Volume"].iloc[-1]
 
-            if any(w in title for w in ["surge", "beat", "upgrade", "profit", "record"]):
-                score += 1
-            if any(w in title for w in ["fall", "miss", "downgrade", "loss"]):
-                score -= 1
-
-        return score
+        if last > avg * 1.5:
+            return 2
+        if last > avg:
+            return 1
+        return 0
     except:
         return 0
 
 
 # =========================
-# ANALYSIS ENGINE v3
+# BLACKROCK ANALYZER v4
 # =========================
 def analyze_stock(ticker):
     try:
         df = yf.download(ticker, period="1y", interval="1d", progress=False)
 
-        if df is None or df.empty or len(df) < 100:
+        if df is None or df.empty or len(df) < 120:
             return None
 
-        df["ma5"] = df["Close"].rolling(5).mean()
-        df["ma21"] = df["Close"].rolling(21).mean()
+        df["ma20"] = df["Close"].rolling(20).mean()
         df["ma50"] = df["Close"].rolling(50).mean()
         df["ma200"] = df["Close"].rolling(200).mean()
-
         df["rsi"] = rsi(df["Close"])
 
         last = df.iloc[-1]
 
         price = float(last["Close"])
-        ma5 = float(last["ma5"])
-        ma21 = float(last["ma21"])
+        ma20 = float(last["ma20"])
         ma50 = float(last["ma50"])
         ma200 = float(last["ma200"])
         rsi_val = float(last["rsi"]) if not np.isnan(last["rsi"]) else 50
 
         returns = df["Close"].pct_change().dropna()
+        momentum = float(np.mean(returns[-30:]))
 
-        momentum_20 = float(np.mean(returns[-20:]))
-        momentum_60 = float(np.mean(returns[-60:]))
-
-        volatility = float(np.std(returns))
-
-        news = news_sentiment(ticker)
+        vol_score = volume_score(df)
 
         score = 50
         reasons = []
 
         # =========================
-        # TREND
+        # TREND STRUCTURE
         # =========================
-        if ma5 > ma21 > ma50:
-            score += 30
-            reasons.append("Güçlü kurumsal trend akışı")
+        if ma20 > ma50 > ma200:
+            score += 35
+            reasons.append("BlackRock trend alignment (multi-timeframe)")
         else:
             score -= 15
 
         if price > ma200:
             score += 20
-            reasons.append("Makro boğa rejimi")
+            reasons.append("Macro bull regime (MA200 üstü)")
         else:
             score -= 10
 
@@ -95,7 +85,7 @@ def analyze_stock(ticker):
         # =========================
         if rsi_val < 30:
             score += 20
-            reasons.append("Aşırı satım (birikim)")
+            reasons.append("Kurumsal birikim bölgesi (RSI düşük)")
         elif rsi_val > 70:
             score -= 20
             reasons.append("Aşırı alım riski")
@@ -103,31 +93,22 @@ def analyze_stock(ticker):
         # =========================
         # MOMENTUM
         # =========================
-        if momentum_60 > 0:
+        if momentum > 0:
             score += 15
-        else:
-            score -= 10
+            reasons.append("Pozitif momentum akışı")
 
         # =========================
-        # NEWS FLOW
+        # SMART MONEY
         # =========================
-        if news > 0:
+        if vol_score == 2:
             score += 20
-            reasons.append("Pozitif haber akışı")
-        elif news < 0:
-            score -= 20
-            reasons.append("Negatif haber akışı")
-
-        # =========================
-        # VOLATILITY
-        # =========================
-        if volatility < 0.02:
+            reasons.append("Smart money giriş (volume spike)")
+        elif vol_score == 1:
             score += 10
-            reasons.append("Düşük risk rejimi")
-        elif volatility > 0.04:
-            score -= 15
-            reasons.append("Yüksek risk")
 
+        # =========================
+        # FINAL SCORE
+        # =========================
         confidence = max(0, min(100, score))
 
         return {
