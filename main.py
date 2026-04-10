@@ -10,11 +10,31 @@ from config import TELEGRAM_TOKEN, CHAT_ID
 # SECTORS
 # =========================
 SECTORS = {
-    "TECH": ["AAPL","MSFT","NVDA","GOOGL","META","AMD","AVGO","ORCL"],
-    "FINANCE": ["JPM","BAC","GS","MS","V","MA"],
-    "HEALTH": ["JNJ","PFE","MRK","LLY","UNH"],
-    "ENERGY": ["XOM","CVX","COP"],
-    "CONSUMER": ["AMZN","TSLA","MCD","COST","WMT"]
+    "TEKNOLOJİ": [
+        "AAPL", "MSFT", "NVDA", "AVGO", "ORCL", "ADBE", "CRM", "AMD", "CSCO", 
+        "ACN", "TXN", "QCOM", "AMAT", "INTU", "IBM", "MU", "LRCX", "NOW", 
+        "ADI", "KLAC", "PANW", "SNPS", "CDNS", "APH", "SNDK"
+    ],
+    "FİNANS": [
+        "JPM", "V", "MA", "BAC", "MS", "GS", "WFC", "AXP", "BLK", 
+        "SPGI", "C", "PGR", "CB", "AON", "MET", "USB", "PNC", "COF", "BK"
+    ],
+    "SAĞLIK": [
+        "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "DHR", "PFE", "AMGN", 
+        "ISRG", "SYK", "ELV", "VRTX", "CI", "REGN", "BSX", "GILD", "BMY", "MDT"
+    ],
+    "ENERJİ": [
+        "XOM", "CVX", "COP", "EOG", "SLB", "MPC", "PSX", "VLO"
+    ],
+    "TÜKETİM": [
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "BKNG", "TJX", 
+        "WMT", "PG", "COST", "KO", "PEP", "PM", "MO", "MDLZ", "TGT", "CL"
+    ],
+    "İLETİŞİM_VE_DİĞER": [
+        "GOOGL", "GOOG", "META", "NFLX", "DIS", "TMUS", "VZ", "T", "CMCSA",
+        "GE", "CAT", "UNP", "HON", "UPS", "LMT", "RTX", "DE", "BA",
+        "NEE", "DUK", "SO", "LIN", "APD", "PLD", "AMT", "EQIX"
+    ]
 }
 
 UNIVERSE = [t for s in SECTORS.values() for t in s]
