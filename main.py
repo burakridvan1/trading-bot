@@ -1,92 +1,88 @@
 import yfinance as yf
 import numpy as np
-import pandas as pd
 
 
-# =========================
-# SAFE FLOAT
-# =========================
-def safe_last(series):
+def safe(x):
     try:
-        if series is None:
-            return None
-        return float(series.iloc[-1])
+        return float(x.iloc[-1])
     except:
         return None
 
 
-# =========================
-# MAIN ANALYZER
-# =========================
-def analyze_stock(ticker: str):
+def analyze_stock(ticker):
 
     try:
         df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
-        if df is None or df.empty or len(df) < 50:
+        if df is None or df.empty or len(df) < 60:
             return None
 
-        df["ma5"] = df["Close"].rolling(5).mean()
-        df["ma21"] = df["Close"].rolling(21).mean()
-        df["ma50"] = df["Close"].rolling(50).mean()
-        df["ma200"] = df["Close"].rolling(200).mean()
+        close = df["Close"]
+        volume = df["Volume"]
 
-        df["vol_ma20"] = df["Volume"].rolling(20).mean()
-        df["returns"] = df["Close"].pct_change()
+        # =========================
+        # INDICATORS
+        # =========================
+        ma20 = close.rolling(20).mean()
+        ma50 = close.rolling(50).mean()
+        ma200 = close.rolling(200).mean()
+        rsi = compute_rsi(close)
 
-        last = df.iloc[-1]
+        price = safe(close)
+        ma20 = safe(ma20)
+        ma50 = safe(ma50)
+        ma200 = safe(ma200)
+        rsi = rsi if rsi else 50
 
-        price = safe_last(last["Close"])
-        ma5 = safe_last(last["ma5"])
-        ma21 = safe_last(last["ma21"])
-        ma50 = safe_last(last["ma50"])
-        ma200 = safe_last(last["ma200"])
-        vol = safe_last(last["Volume"])
-        vol_ma = safe_last(last["vol_ma20"])
+        vol = safe(volume)
+        vol_ma = safe(volume.rolling(20).mean())
 
-        if None in [price, ma5, ma21, ma50, ma200]:
+        if None in [price, ma20, ma50, ma200]:
             return None
 
         # =========================
-        # SCORING ENGINE (0-100)
+        # V6 HEDGE FUND SCORE
         # =========================
         score = 0
         reasons = []
 
-        # Trend
-        if price > ma5:
+        # Trend Structure
+        if price > ma20:
             score += 10
-            reasons.append("Fiyat MA5 üstünde (short momentum)")
+            reasons.append("Price above MA20")
 
-        if ma5 > ma21:
+        if ma20 > ma50:
             score += 15
-            reasons.append("MA5 > MA21 (trend bullish)")
+            reasons.append("Bullish MA alignment (20>50)")
 
-        if ma21 > ma50:
+        if ma50 > ma200:
             score += 20
-            reasons.append("MA21 > MA50 (orta vade yükseliş)")
+            reasons.append("Long-term uptrend (50>200)")
 
-        if price > ma200:
-            score += 20
-            reasons.append("Fiyat MA200 üstünde (bull market zone)")
-        else:
-            reasons.append("Fiyat MA200 altında (riskli bölge)")
+        # Momentum
+        if rsi < 30:
+            score += 15
+            reasons.append("Oversold rebound zone (RSI)")
+        elif rsi > 70:
+            score -= 10
+            reasons.append("Overbought risk (RSI)")
 
         # Volume confirmation
         if vol and vol_ma and vol > vol_ma:
             score += 15
-            reasons.append("Hacim artışı (kurumsal ilgi olabilir)")
+            reasons.append("Institutional volume inflow")
 
-        # Volatility check
-        recent_return = df["returns"].iloc[-1]
-        if recent_return and recent_return > 0:
+        # Mean reversion opportunity
+        if abs(price - ma20) / price < 0.03:
             score += 10
-            reasons.append("Pozitif momentum")
+            reasons.append("Price compression zone")
 
-        # Stability bonus
-        if ma21 and ma50 and abs(ma21 - ma50) / price < 0.05:
+        # Risk filter
+        volatility = np.std(close.pct_change().dropna()) * 100
+
+        if volatility < 2:
             score += 10
-            reasons.append("Fiyat sıkışma bölgesi (breakout potansiyeli)")
+            reasons.append("Low volatility accumulation")
 
         # clamp
         score = max(0, min(100, score))
@@ -95,8 +91,24 @@ def analyze_stock(ticker: str):
             "ticker": ticker,
             "price": price,
             "confidence": score,
+            "rsi": rsi,
             "reasons": reasons
         }
 
     except:
         return None
+
+
+# RSI CALC
+def compute_rsi(series, period=14):
+    try:
+        delta = series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+
+        return float(rsi.iloc[-1])
+    except:
+        return 50
