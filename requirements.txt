@@ -5,3 +5,5 @@ python-telegram-bot==20.3
 python-dotenv
 lxml
 html5lib
+pandas==2.2.2
+numpy==1.26.4
