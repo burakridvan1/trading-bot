@@ -1,90 +1,134 @@
+import pandas as pd
+import numpy as np
 import yfinance as yf
-from ta.momentum import RSIIndicator
-from ta.trend import MACD, SMAIndicator
-from ta.volatility import BollingerBands
 
 
-def analyze_stock(ticker, buy_price=None):
+# =========================
+# INDICATORS
+# =========================
+
+def rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+
+def moving_averages(df):
+    df["ma5"] = df["Close"].rolling(5).mean()
+    df["ma21"] = df["Close"].rolling(21).mean()
+    return df
+
+
+def volume_spike(df):
+    df["vol_ma"] = df["Volume"].rolling(20).mean()
+    df["vol_spike"] = df["Volume"] / df["vol_ma"]
+    return df
+
+
+# =========================
+# HEDGE FUND SCORING ENGINE
+# =========================
+
+def analyze_stock(ticker, entry_price=None):
     try:
-        data = yf.download(ticker, period="3mo", interval="1d", progress=False)
+        df = yf.download(ticker, period="3mo", interval="1d", progress=False)
 
-        if data is None or data.empty or len(data) < 50:
+        if df.empty:
             return None
 
-        close = data['Close']
-        current_price = close.iloc[-1]
+        df = moving_averages(df)
+        df = volume_spike(df)
+        df["rsi"] = rsi(df["Close"])
+
+        last = df.iloc[-1]
+
+        price = float(last["Close"])
+        ma5 = float(last["ma5"])
+        ma21 = float(last["ma21"])
+        rsi_val = float(last["rsi"]) if not np.isnan(last["rsi"]) else 50
+        vol_spike = float(last["vol_spike"]) if not np.isnan(last["vol_spike"]) else 1
+
+        # =========================
+        # SCORING SYSTEM (HEDGE FUND STYLE)
+        # =========================
 
         score = 0
-        max_score = 8
+
+        # TREND
+        if ma5 > ma21:
+            score += 30
+        else:
+            score -= 20
 
         # RSI
-        rsi = RSIIndicator(close).rsi().iloc[-1]
-        if rsi < 30:
-            score += 2
-        elif rsi > 70:
-            score -= 2
+        if rsi_val < 30:
+            score += 25
+        elif rsi_val < 45:
+            score += 10
+        elif rsi_val > 70:
+            score -= 25
 
-        # MACD
-        macd = MACD(close)
-        if macd.macd_diff().iloc[-1] > 0:
-            score += 1
-        else:
-            score -= 1
+        # VOLUME
+        if vol_spike > 1.5:
+            score += 20
+        elif vol_spike > 1.2:
+            score += 10
 
-        # Bollinger
-        bb = BollingerBands(close)
-        if current_price < bb.bollinger_lband().iloc[-1]:
-            score += 2
-        elif current_price > bb.bollinger_hband().iloc[-1]:
-            score -= 2
+        # PRICE MOMENTUM
+        if price > ma5:
+            score += 10
 
-        # Trend
-        sma20 = SMAIndicator(close, 20).sma_indicator().iloc[-1]
-        sma50 = SMAIndicator(close, 50).sma_indicator().iloc[-1]
+        # ENTRY PRICE (portfolio logic)
+        if entry_price:
+            if price < entry_price * 0.95:
+                score -= 30  # stop loss pressure
+            elif price > entry_price * 1.05:
+                score += 20  # profit zone
 
-        if sma20 > sma50:
-            score += 1
-        else:
-            score -= 1
+        # =========================
+        # CONFIDENCE NORMALIZATION
+        # =========================
 
-        # MA5 vs MA21
-        ma5 = SMAIndicator(close, 5).sma_indicator().iloc[-1]
-        ma21 = SMAIndicator(close, 21).sma_indicator().iloc[-1]
+        confidence = max(0, min(100, score + 50))
 
-        if ma5 > ma21:
-            score += 2
-        else:
-            score -= 2
+        # =========================
+        # SIGNAL TYPE
+        # =========================
 
-        # Confidence
-        confidence = round((abs(score) / max_score) * 100, 1)
+        signal_type = None
 
-        # PORTFÖY
-        if buy_price:
-            change_pct = ((current_price - buy_price) / buy_price) * 100
+        if confidence >= 75 and ma5 > ma21:
+            signal_type = "BUY"
+        elif confidence <= 35:
+            signal_type = "SELL"
 
-            if change_pct <= -5:
-                return {"type": "STOP", "msg": f"🚨 {ticker} STOP LOSS (-{abs(round(change_pct,2))}%)"}
+        msg = f"""
+📊 {ticker}
+💰 Price: {price:.2f}
+📈 MA5: {ma5:.2f} | MA21: {ma21:.2f}
+📉 RSI: {rsi_val:.2f}
+📦 Volume Spike: {vol_spike:.2f}
+🧠 Confidence: %{confidence}
+"""
 
-            if change_pct >= 10 and score < 0:
-                return {"type": "TP", "msg": f"💰 {ticker} TAKE PROFIT (+{round(change_pct,2)}%)"}
+        if signal_type:
+            msg += f"\n🚨 SIGNAL: {signal_type}"
 
-        # TOP fırsatlar için veri döndür
-        if score >= 4:
-            return {
-                "type": "BUY",
-                "ticker": ticker,
-                "score": score,
-                "confidence": confidence
-            }
+        return {
+            "ticker": ticker,
+            "price": price,
+            "ma5": ma5,
+            "ma21": ma21,
+            "rsi": rsi_val,
+            "volume_spike": vol_spike,
+            "confidence": confidence,
+            "type": signal_type,
+            "msg": msg
+        }
 
-        elif score <= -4:
-            return {
-                "type": "SELL",
-                "msg": f"🚨 {ticker} STRONG SELL | Score: {score} | %{confidence}"
-            }
-
-        return None
-
-    except:
+    except Exception as e:
+        print(f"ERROR {ticker}:", e)
         return None
