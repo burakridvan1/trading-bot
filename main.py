@@ -18,7 +18,7 @@ SP500 = [
 
 
 # =========================
-# START
+# START MESSAGE
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -28,7 +28,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# TOP5 ENGINE
+# TOP5 SCAN
 # =========================
 async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -53,7 +53,7 @@ async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"{i}. {s['ticker']}\n"
         msg += f"💰 {s['price']:.2f}\n"
         msg += f"🧠 Güven: %{s['confidence']:.1f}\n"
-        msg += "📌 Kurumsal gerekçe:\n"
+        msg += "📌 Sebepler:\n"
 
         for r in s["reasons"]:
             msg += f"- {r}\n"
@@ -64,7 +64,7 @@ async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# AUTO SIGNAL PUSH (BLACKROCK FEATURE)
+# AUTO SIGNAL ENGINE (FIXED)
 # =========================
 async def auto_signal(app):
     while True:
@@ -88,7 +88,14 @@ async def auto_signal(app):
         except Exception as e:
             print("Auto signal error:", e)
 
-        await asyncio.sleep(60 * 60)  # 1 saat
+        await asyncio.sleep(3600)  # 1 saat
+
+
+# =========================
+# BACKGROUND STARTER
+# =========================
+async def start_background(app):
+    asyncio.create_task(auto_signal(app))
 
 
 # =========================
@@ -100,8 +107,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top5", top5))
 
-    # background task
-    app.job_queue.run_repeating(lambda ctx: asyncio.create_task(auto_signal(app)), interval=3600, first=10)
+    # job queue YOK → safe async task
+    asyncio.get_event_loop().create_task(start_background(app))
 
     app.run_polling(drop_pending_updates=True)
 
