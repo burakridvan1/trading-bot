@@ -1,6 +1,5 @@
-# config.py
-TELEGRAM_TOKEN = "8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU"
-CHAT_ID = "1328970821"
+import os
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 SCAN_INTERVAL_MINUTES = 15
-MAX_WORKERS = 20   # hız ayarı (sunucuya göre 10-30 arası)
