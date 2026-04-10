@@ -1,89 +1,76 @@
-# main.py
 import asyncio
 import nest_asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from concurrent.futures import ThreadPoolExecutor
+import yfinance as yf
+from telegram import Bot
+import config
+from analyzer import analyze_stock
 
-from config import TELEGRAM_TOKEN
-from analyzer import batch_get_signals
-from portfolio import add_to_portfolio, remove_from_portfolio, get_portfolio
+nest_asyncio.apply()
 
-nest_asyncio.apply()  # Jupyter veya Docker uyumu için
+bot = Bot(token=config.TELEGRAM_TOKEN)
 
-scheduler = AsyncIOScheduler()
+# Aynı sinyali tekrar atmamak için cache
+sent_signals = set()
 
-# ---------------- Telegram Komutları ----------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Merhaba! Hisse botuna hoşgeldiniz.")
 
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Kullanım: /add TICKER")
+async def send_telegram(message):
+    try:
+        await bot.send_message(chat_id=config.CHAT_ID, text=message)
+    except Exception as e:
+        print("Telegram hata:", e)
+
+
+def get_all_tickers():
+    try:
+        # TÜM ABD hisseleri (yfinance internal)
+        tickers = yf.Tickers(" ".join(yf.shared._EXCHANGE_TICKERS.get('NASDAQ', [])[:3000]))
+
+        # fallback: S&P500 (garanti)
+        import pandas as pd
+        sp500 = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]['Symbol'].tolist()
+
+        return list(set(sp500))
+
+    except:
+        return []
+
+
+async def scan_market():
+    tickers = get_all_tickers()
+
+    if not tickers:
+        await send_telegram("Ticker listesi alınamadı ❌")
         return
-    ticker = context.args[0].upper()
-    if add_to_portfolio(update.message.from_user.id, ticker):
-        await update.message.reply_text(f"{ticker} portföyünüze eklendi.")
+
+    loop = asyncio.get_event_loop()
+    results = []
+
+    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
+        tasks = [
+            loop.run_in_executor(executor, analyze_stock, ticker)
+            for ticker in tickers
+        ]
+
+        completed = await asyncio.gather(*tasks)
+
+    for res in completed:
+        if res and res not in sent_signals:
+            results.append(res)
+            sent_signals.add(res)
+
+    if results:
+        for r in results[:20]:  # spam önleme
+            await send_telegram(r)
     else:
-        await update.message.reply_text(f"{ticker} zaten portföyünüzde.")
+        await send_telegram("Sinyal yok.")
 
-async def remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Kullanım: /remove TICKER")
-        return
-    ticker = context.args[0].upper()
-    if remove_from_portfolio(update.message.from_user.id, ticker):
-        await update.message.reply_text(f"{ticker} portföyünüzden çıkarıldı.")
-    else:
-        await update.message.reply_text(f"{ticker} portföyünüzde yok.")
 
-async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    portfolio = get_portfolio(update.message.from_user.id)
-    if not portfolio:
-        await update.message.reply_text("Portföyünüz boş.")
-        return
-    msg = "Portföyünüz:\n" + "\n".join(portfolio)
-    await update.message.reply_text(msg)
-
-# ---------------- Scheduler Fonksiyonları ----------------
-async def scan_market(context):
-    results = batch_get_signals()
-    for ticker, signal in results.items():
-        if signal == "STRONG BUY":
-            # Tüm kullanıcılara STRONG BUY sinyali gönder
-            for user_id in context.bot_data.get("users", []):
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için STRONG BUY sinyali!")
-        elif signal == "SELL":
-            # Tüm kullanıcılara SELL sinyali gönder
-            for user_id in context.bot_data.get("users", []):
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
-
-async def check_portfolio(context):
-    for user_id, tickers in context.bot_data.get("users", {}).items():
-        for ticker in tickers:
-            signal = batch_get_signals().get(ticker)
-            if signal == "SELL":
-                await context.bot.send_message(chat_id=user_id, text=f"{ticker} için SELL sinyali!")
-
-# ---------------- Main ----------------
 async def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    while True:
+        await scan_market()
+        await asyncio.sleep(config.SCAN_INTERVAL_MINUTES * 60)
 
-    # Komutlar
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add))
-    app.add_handler(CommandHandler("remove", remove))
-    app.add_handler(CommandHandler("portfolio", portfolio_cmd))
-
-    # Scheduler işleri
-    scheduler.add_job(scan_market, "interval", minutes=60, kwargs={"context": app})
-    scheduler.add_job(check_portfolio, "interval", minutes=30, kwargs={"context": app})
-    scheduler.start()
-
-    # Kullanıcı verisi için boş dict
-    app.bot_data["users"] = {}
-
-    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
