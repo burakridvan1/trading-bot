@@ -1,56 +1,73 @@
 import asyncio
 import nest_asyncio
 from concurrent.futures import ThreadPoolExecutor
-import yfinance as yf
-from telegram import Bot
+import pandas as pd
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import config
 from analyzer import analyze_stock
+from portfolio_manager import add_stock, remove_stock, list_portfolio, load_portfolio
 
 nest_asyncio.apply()
 
-bot = Bot(token=config.TELEGRAM_TOKEN)
-
-# Aynı sinyali tekrar atmamak için cache
 sent_signals = set()
 
+# TELEGRAM APP
+app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
-async def send_telegram(message):
+
+# 📩 KOMUTLAR
+async def ekle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        await bot.send_message(chat_id=config.CHAT_ID, text=message)
-    except Exception as e:
-        print("Telegram hata:", e)
+        ticker = context.args[0]
+        price = float(context.args[1])
+        msg = add_stock(ticker, price)
+        await update.message.reply_text(msg)
+    except:
+        await update.message.reply_text("Kullanım: /ekle TSLA 250")
 
 
+async def sil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        ticker = context.args[0]
+        msg = remove_stock(ticker)
+        await update.message.reply_text(msg)
+    except:
+        await update.message.reply_text("Kullanım: /sil TSLA")
+
+
+async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = list_portfolio()
+    await update.message.reply_text(msg)
+
+
+# 📊 TICKER
 def get_all_tickers():
     try:
-        # TÜM ABD hisseleri (yfinance internal)
-        tickers = yf.Tickers(" ".join(yf.shared._EXCHANGE_TICKERS.get('NASDAQ', [])[:3000]))
-
-        # fallback: S&P500 (garanti)
-        import pandas as pd
         sp500 = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]['Symbol'].tolist()
-
         return list(set(sp500))
-
     except:
         return []
 
 
-async def scan_market():
+# 🔍 MARKET SCAN
+async def scan_market(bot: Bot):
     tickers = get_all_tickers()
-
-    if not tickers:
-        await send_telegram("Ticker listesi alınamadı ❌")
-        return
+    portfolio = load_portfolio()
 
     loop = asyncio.get_event_loop()
     results = []
 
     with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as executor:
-        tasks = [
-            loop.run_in_executor(executor, analyze_stock, ticker)
-            for ticker in tickers
-        ]
+        tasks = []
+
+        # Market
+        for ticker in tickers:
+            tasks.append(loop.run_in_executor(executor, analyze_stock, ticker, None))
+
+        # Portfolio
+        for ticker, price in portfolio.items():
+            tasks.append(loop.run_in_executor(executor, analyze_stock, ticker, price))
 
         completed = await asyncio.gather(*tasks)
 
@@ -60,16 +77,31 @@ async def scan_market():
             sent_signals.add(res)
 
     if results:
-        for r in results[:20]:  # spam önleme
-            await send_telegram(r)
+        for r in results[:25]:
+            await bot.send_message(chat_id=config.CHAT_ID, text=r)
     else:
-        await send_telegram("Sinyal yok.")
+        await bot.send_message(chat_id=config.CHAT_ID, text="Sinyal yok.")
 
 
-async def main():
+# 🔁 LOOP
+async def periodic_scan(app):
     while True:
-        await scan_market()
+        await scan_market(app.bot)
         await asyncio.sleep(config.SCAN_INTERVAL_MINUTES * 60)
+
+
+# 🚀 MAIN
+async def main():
+    app.add_handler(CommandHandler("ekle", ekle))
+    app.add_handler(CommandHandler("sil", sil))
+    app.add_handler(CommandHandler("liste", liste))
+
+    await app.initialize()
+    await app.start()
+
+    asyncio.create_task(periodic_scan(app))
+
+    await app.updater.start_polling()
 
 
 if __name__ == "__main__":
