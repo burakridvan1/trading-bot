@@ -4,16 +4,21 @@ import pandas as pd
 
 
 # =========================
-# SAFE
+# SAFE VALUE
 # =========================
 def safe(series):
     try:
+        if series is None:
+            return None
+
         if isinstance(series, pd.Series):
             series = series.dropna()
             if len(series) == 0:
                 return None
             return float(series.iloc[-1])
+
         return float(series)
+
     except:
         return None
 
@@ -24,6 +29,7 @@ def safe(series):
 def compute_rsi(series, period=14):
     try:
         delta = series.diff()
+
         gain = delta.clip(lower=0).rolling(period).mean()
         loss = -delta.clip(upper=0).rolling(period).mean()
 
@@ -31,32 +37,39 @@ def compute_rsi(series, period=14):
         rsi = 100 - (100 / (1 + rs))
 
         rsi = rsi.dropna()
+
         if len(rsi) == 0:
             return 50
 
         return float(rsi.iloc[-1])
+
     except:
         return 50
 
 
 # =========================
-# WIN RATE (IMPROVED)
+# WIN RATE (SAFE)
 # =========================
 def compute_win_rate(close):
     try:
-        returns = close.pct_change().dropna()
-        if len(returns) == 0:
+        if close is None or len(close) < 20:
             return 50
 
-        return int((returns > 0).mean() * 100)
+        future = close.shift(-5)
+        returns = close.pct_change()
+
+        valid = (returns > 0) & (future.pct_change() > 0)
+
+        return int((valid.sum() / len(close)) * 100)
+
     except:
         return 50
 
 
 # =========================
-# BLACKROCK ANALYZER V7
+# MAIN ANALYZER
 # =========================
-def analyze_stock(ticker, sector_weight=1.0):
+def analyze_stock(ticker):
 
     try:
         df = yf.download(
@@ -67,13 +80,14 @@ def analyze_stock(ticker, sector_weight=1.0):
             threads=False
         )
 
-        if df is None or df.empty or len(df) < 50:
+        if df is None or df.empty or len(df) < 60:
             return None
 
         close = df["Close"]
         volume = df["Volume"]
 
         price = safe(close)
+
         if price is None:
             return None
 
@@ -88,79 +102,61 @@ def analyze_stock(ticker, sector_weight=1.0):
 
         win_rate = compute_win_rate(close)
 
-        returns = close.pct_change().dropna()
-        volatility = np.std(returns.values) * 100 if len(returns) > 0 else 0
-
-        score = 50
+        score = 0
         reasons = []
 
-        # =========================
-        # TREND (CORE WEIGHT)
-        # =========================
+        # TREND
         if ma20 and price > ma20:
             score += 10
-            reasons.append("Trend +")
+            reasons.append("MA20 üstü")
 
         if ma20 and ma50 and ma20 > ma50:
             score += 15
-            reasons.append("Bull trend")
+            reasons.append("Trend güçlü")
 
         if ma50 and ma200 and ma50 > ma200:
             score += 20
-            reasons.append("Macro bull")
+            reasons.append("Uzun trend")
 
-        # =========================
         # RSI
-        # =========================
         if rsi < 30:
-            score += 10
-            reasons.append("Oversold")
+            score += 15
+            reasons.append("RSI oversold")
         elif rsi > 70:
             score -= 10
-            reasons.append("Overbought")
+            reasons.append("RSI overbought")
 
-        # =========================
         # VOLUME
-        # =========================
         if vol and vol_ma and vol > vol_ma:
             score += 10
-            reasons.append("Smart money flow")
+            reasons.append("Hacim artışı")
 
-        # =========================
-        # VOLATILITY FILTER
-        # =========================
-        if volatility < 2:
+        # VOLATILITY SAFE
+        try:
+            returns = close.pct_change().dropna()
+            volatility = np.std(returns) * 100
+
+            if volatility < 2:
+                score += 10
+                reasons.append("Düşük volatilite")
+        except:
+            pass
+
+        # PRICE COMPRESSION
+        if ma20 and abs(price - ma20) / price < 0.03:
             score += 10
-            reasons.append("Low risk zone")
-        elif volatility > 6:
-            score -= 10
-            reasons.append("High risk")
+            reasons.append("Sıkışma")
 
-        # =========================
-        # WIN RATE BOOST
-        # =========================
-        score += (win_rate - 50) * 0.2
-
-        # =========================
-        # SECTOR MULTIPLIER
-        # =========================
-        score *= sector_weight
-
-        score = max(0, min(100, score))
-
-        if not reasons:
-            reasons.append("Neutral")
+        score = max(5, min(100, score))
 
         return {
             "ticker": ticker,
             "price": round(price, 2),
-            "confidence": round(score, 2),
-            "rsi": round(rsi, 2),
+            "confidence": score,
+            "rsi": rsi,
             "win_rate": win_rate,
-            "volatility": round(volatility, 2),
             "reasons": reasons
         }
 
-    except Exception as e:
-        print("ERROR:", ticker, e)
+    except:
         return None
