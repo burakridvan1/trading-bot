@@ -1,117 +1,102 @@
-import asyncio
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
-from analyzer import analyze_stock
-from config import TELEGRAM_TOKEN, CHAT_ID
+import yfinance as yf
+import numpy as np
+import pandas as pd
 
 
 # =========================
-# S&P500 UNIVERSE
+# SAFE FLOAT
 # =========================
-SP500 = [
-    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","GOOG","TSLA","BRK-B","JPM",
-    "UNH","XOM","AVGO","PG","JNJ","V","MA","HD","LLY","MRK",
-    "ABBV","COST","PEP","ADBE","CRM","NFLX","AMD","INTC","CSCO","WMT",
-    "BAC","KO","TMO","ACN","DIS","ABT","MCD","LIN","ORCL","CMCSA"
-]
-
-
-# =========================
-# START MESSAGE
-# =========================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🏦 BLACKROCK MODE v4 AKTİF\n\n"
-        "/top5 → Kurumsal fırsatlar\n"
-    )
+def safe_last(series):
+    try:
+        if series is None:
+            return None
+        return float(series.iloc[-1])
+    except:
+        return None
 
 
 # =========================
-# TOP5 SCAN
+# MAIN ANALYZER
 # =========================
-async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def analyze_stock(ticker: str):
 
-    await update.message.reply_text("📊 BlackRock AI tarıyor...")
+    try:
+        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
-    results = []
+        if df is None or df.empty or len(df) < 50:
+            return None
 
-    for t in SP500:
-        r = analyze_stock(t)
-        if r:
-            results.append(r)
+        df["ma5"] = df["Close"].rolling(5).mean()
+        df["ma21"] = df["Close"].rolling(21).mean()
+        df["ma50"] = df["Close"].rolling(50).mean()
+        df["ma200"] = df["Close"].rolling(200).mean()
 
-    if not results:
-        await update.message.reply_text("❌ Veri alınamadı")
-        return
+        df["vol_ma20"] = df["Volume"].rolling(20).mean()
+        df["returns"] = df["Close"].pct_change()
 
-    results = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+        last = df.iloc[-1]
 
-    msg = "🏦 BLACKROCK TOP 5 PICKS\n\n"
+        price = safe_last(last["Close"])
+        ma5 = safe_last(last["ma5"])
+        ma21 = safe_last(last["ma21"])
+        ma50 = safe_last(last["ma50"])
+        ma200 = safe_last(last["ma200"])
+        vol = safe_last(last["Volume"])
+        vol_ma = safe_last(last["vol_ma20"])
 
-    for i, s in enumerate(results, 1):
-        msg += f"{i}. {s['ticker']}\n"
-        msg += f"💰 {s['price']:.2f}\n"
-        msg += f"🧠 Güven: %{s['confidence']:.1f}\n"
-        msg += "📌 Sebepler:\n"
+        if None in [price, ma5, ma21, ma50, ma200]:
+            return None
 
-        for r in s["reasons"]:
-            msg += f"- {r}\n"
+        # =========================
+        # SCORING ENGINE (0-100)
+        # =========================
+        score = 0
+        reasons = []
 
-        msg += "\n"
+        # Trend
+        if price > ma5:
+            score += 10
+            reasons.append("Fiyat MA5 üstünde (short momentum)")
 
-    await update.message.reply_text(msg)
+        if ma5 > ma21:
+            score += 15
+            reasons.append("MA5 > MA21 (trend bullish)")
 
+        if ma21 > ma50:
+            score += 20
+            reasons.append("MA21 > MA50 (orta vade yükseliş)")
 
-# =========================
-# AUTO SIGNAL ENGINE (FIXED)
-# =========================
-async def auto_signal(app):
-    while True:
-        try:
-            results = []
+        if price > ma200:
+            score += 20
+            reasons.append("Fiyat MA200 üstünde (bull market zone)")
+        else:
+            reasons.append("Fiyat MA200 altında (riskli bölge)")
 
-            for t in SP500:
-                r = analyze_stock(t)
-                if r:
-                    results.append(r)
+        # Volume confirmation
+        if vol and vol_ma and vol > vol_ma:
+            score += 15
+            reasons.append("Hacim artışı (kurumsal ilgi olabilir)")
 
-            top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+        # Volatility check
+        recent_return = df["returns"].iloc[-1]
+        if recent_return and recent_return > 0:
+            score += 10
+            reasons.append("Pozitif momentum")
 
-            msg = "🚨 BLACKROCK AUTO SIGNAL\n\n"
+        # Stability bonus
+        if ma21 and ma50 and abs(ma21 - ma50) / price < 0.05:
+            score += 10
+            reasons.append("Fiyat sıkışma bölgesi (breakout potansiyeli)")
 
-            for s in top:
-                msg += f"{s['ticker']} → %{s['confidence']:.1f}\n"
+        # clamp
+        score = max(0, min(100, score))
 
-            await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+        return {
+            "ticker": ticker,
+            "price": price,
+            "confidence": score,
+            "reasons": reasons
+        }
 
-        except Exception as e:
-            print("Auto signal error:", e)
-
-        await asyncio.sleep(3600)  # 1 saat
-
-
-# =========================
-# BACKGROUND STARTER
-# =========================
-async def start_background(app):
-    asyncio.create_task(auto_signal(app))
-
-
-# =========================
-# MAIN
-# =========================
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("top5", top5))
-
-    # job queue YOK → safe async task
-    asyncio.get_event_loop().create_task(start_background(app))
-
-    app.run_polling(drop_pending_updates=True)
-
-
-if __name__ == "__main__":
-    main()
+    except:
+        return None
