@@ -3,6 +3,9 @@ import numpy as np
 import pandas as pd
 
 
+# =========================
+# SAFE VALUE
+# =========================
 def safe(series):
     try:
         if isinstance(series, pd.Series):
@@ -15,6 +18,9 @@ def safe(series):
         return None
 
 
+# =========================
+# RSI
+# =========================
 def compute_rsi(series, period=14):
     try:
         delta = series.diff()
@@ -33,13 +39,15 @@ def compute_rsi(series, period=14):
         return 50
 
 
+# =========================
+# WIN RATE (FIXED)
+# =========================
 def compute_win_rate(close):
     try:
-        future_returns = close.pct_change().shift(-5)
-        signals = close.pct_change()
+        returns = close.pct_change()
 
-        wins = ((signals > 0) & (future_returns > 0)).sum()
-        total = len(close)
+        wins = (returns > 0).sum()
+        total = len(returns)
 
         if total == 0:
             return 50
@@ -49,7 +57,11 @@ def compute_win_rate(close):
         return 50
 
 
+# =========================
+# ANALYZER V6 FIXED
+# =========================
 def analyze_stock(ticker):
+
     try:
         df = yf.download(
             ticker,
@@ -66,6 +78,9 @@ def analyze_stock(ticker):
         volume = df["Volume"]
 
         price = safe(close)
+        if price is None:
+            return None
+
         ma20 = safe(close.rolling(20).mean())
         ma50 = safe(close.rolling(50).mean())
         ma200 = safe(close.rolling(200).mean())
@@ -79,50 +94,72 @@ def analyze_stock(ticker):
         score = 0
         reasons = []
 
-        if price and ma20 and price > ma20:
-            score += 10
+        # =========================
+        # TREND
+        # =========================
+        if ma20 is not None and price > ma20:
+            score += 15
             reasons.append("MA20 üstü")
 
         if ma20 and ma50 and ma20 > ma50:
-            score += 15
-            reasons.append("Trend güçlü")
+            score += 20
+            reasons.append("Trend bullish (20>50)")
 
         if ma50 and ma200 and ma50 > ma200:
-            score += 20
-            reasons.append("Uzun trend güçlü")
+            score += 25
+            reasons.append("Macro uptrend (50>200)")
 
+        # =========================
+        # RSI
+        # =========================
         if rsi < 30:
             score += 15
-            reasons.append("RSI düşük")
+            reasons.append("RSI oversold")
         elif rsi > 70:
             score -= 10
-            reasons.append("RSI yüksek")
+            reasons.append("RSI overbought")
 
-        if vol and vol_ma and vol > vol_ma:
-            score += 10
-            reasons.append("Hacim artışı")
+        # =========================
+        # VOLUME
+        # =========================
+        if vol is not None and vol_ma is not None and vol > vol_ma:
+            score += 15
+            reasons.append("Institutional volume")
 
+        # =========================
+        # VOLATILITY
+        # =========================
         returns = close.pct_change().dropna()
         if len(returns) > 10:
             volatility = np.std(returns.values) * 100
+
             if volatility < 2:
                 score += 10
-                reasons.append("Düşük volatilite")
+                reasons.append("Low volatility")
 
-        if ma20 and abs(price - ma20) / price < 0.03:
-            score += 10
-            reasons.append("Sıkışma")
+            if volatility > 5:
+                score -= 10
+                reasons.append("High volatility risk")
 
-        score = max(5, min(100, score))
+        # =========================
+        # COMPRESSION
+        # =========================
+        if ma20 is not None:
+            if abs(price - ma20) / price < 0.03:
+                score += 10
+                reasons.append("Compression zone")
+
+        # clamp
+        score = max(0, min(100, score))
 
         if not reasons:
-            reasons.append("Nötr")
+            reasons.append("Neutral structure")
 
         return {
             "ticker": ticker,
-            "price": price,
+            "price": round(price, 2),
             "confidence": score,
-            "rsi": rsi,
+            "rsi": round(rsi, 2),
             "win_rate": win_rate,
             "reasons": reasons
         }
