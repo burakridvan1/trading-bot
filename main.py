@@ -12,24 +12,23 @@ from portfolio_manager import load_portfolio, add_stock, remove_stock, list_port
 
 
 # =========================
-# BOT INIT
+# BOT APP
 # =========================
 
 app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 
 
 # =========================
-# START COMMAND
+# START MESSAGE
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Hedge Fund Bot Aktif!\n\n"
-        "Komutlar:\n"
-        "/top5 - En iyi fırsatlar\n"
+        "🤖 Hedge Fund Bot Aktif\n\n"
+        "/top5 - en iyi hisseler\n"
         "/ekle SYMBOL PRICE\n"
         "/sil SYMBOL\n"
-        "/liste"
+        "/liste - portfolio"
     )
 
 
@@ -61,10 +60,10 @@ async def liste(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
-# TICKERS
+# ALL SP500 TICKERS
 # =========================
 
-def get_all_tickers():
+def get_tickers():
     try:
         url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         df = pd.read_html(url)[0]
@@ -74,104 +73,93 @@ def get_all_tickers():
 
 
 # =========================
-# TOP 5 COMMAND
+# TOP5 HEDGE FUND SCORING
 # =========================
 
 async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Top 5 hesaplanıyor...")
+    await update.message.reply_text("🔍 Analiz yapılıyor...")
 
-    tickers = get_all_tickers()
+    tickers = get_tickers()
     results = []
 
-    for t in tickers:
+    for t in tickers[:80]:  # stability limit
         r = analyze_stock(t)
 
-        if r and r.get("type") == "BUY":
+        if r and r["type"] == "BUY":
             results.append(r)
 
     top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
 
     if not top:
-        await update.message.reply_text("❌ Fırsat bulunamadı")
+        await update.message.reply_text("❌ Sinyal yok")
         return
 
-    msg = "🏆 HEDGE FUND TOP 5\n\n"
+    msg = "🏆 TOP 5 HİSSE\n\n"
 
-    for i, t in enumerate(top, 1):
+    for i, s in enumerate(top, 1):
         msg += (
-            f"{i}. {t['ticker']}\n"
-            f"💰 Price: {t['price']:.2f}\n"
-            f"🧠 Confidence: %{t['confidence']}\n"
-            f"📊 MA Trend: {t['ma5'] > t['ma21']}\n\n"
+            f"{i}. {s['ticker']}\n"
+            f"💰 {s['price']:.2f}\n"
+            f"🧠 %{s['confidence']}\n"
+            f"📊 MA Trend: {s['ma5'] > s['ma21']}\n\n"
         )
 
     await update.message.reply_text(msg)
 
 
 # =========================
-# BACKGROUND SCANNER
+# BACKGROUND SCANNER (SAFE)
 # =========================
 
-def scan_loop():
+def scanner():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     while True:
         try:
-            tickers = get_all_tickers()
+            tickers = get_tickers()
             portfolio = load_portfolio()
 
-            messages = []
+            signals = []
 
-            for t in tickers[:50]:  # LIMIT (stability)
+            for t in tickers[:40]:
                 r = analyze_stock(t)
                 if r:
-                    messages.append(f"{r['ticker']} → %{r['confidence']}")
+                    signals.append(f"{r['ticker']} %{r['confidence']}")
 
             for t, p in portfolio.items():
                 r = analyze_stock(t, p)
                 if r:
-                    messages.append(f"[PORTFOLIO] {r['ticker']} → %{r['confidence']}")
+                    signals.append(f"[PORTFOLIO] {r['ticker']} %{r['confidence']}")
 
-            for m in messages[:10]:
+            for s in signals[:10]:
                 loop.run_until_complete(
-                    app.bot.send_message(chat_id=config.CHAT_ID, text=m)
+                    app.bot.send_message(chat_id=config.CHAT_ID, text=s)
                 )
 
             time.sleep(config.SCAN_INTERVAL_MINUTES * 60)
 
         except Exception as e:
-            print("SCAN ERROR:", e)
+            print("SCANNER ERROR:", e)
             time.sleep(10)
 
 
 # =========================
-# FIX: NO DUPLICATE INSTANCE ISSUE
-# =========================
-
-def start_bot_once():
-    """
-    IMPORTANT:
-    Prevent multiple polling loops in same process.
-    """
-    app.run_polling()
-
-
-# =========================
-# MAIN
+# SAFE START (CRITICAL FIX)
 # =========================
 
 def main():
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("top5", top5))
     app.add_handler(CommandHandler("ekle", ekle))
     app.add_handler(CommandHandler("sil", sil))
     app.add_handler(CommandHandler("liste", liste))
-    app.add_handler(CommandHandler("top5", top5))
 
-    threading.Thread(target=scan_loop, daemon=True).start()
+    # background thread
+    threading.Thread(target=scanner, daemon=True).start()
 
-    # IMPORTANT FIX:
-    start_bot_once()
+    # IMPORTANT: ONLY ONE INSTANCE
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
