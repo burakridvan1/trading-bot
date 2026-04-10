@@ -1,7 +1,7 @@
 yfinance
 pandas
-ta
+numpy
 python-telegram-bot==20.3
-nest_asyncio
+python-dotenv
 lxml
 html5lib
