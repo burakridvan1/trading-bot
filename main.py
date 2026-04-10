@@ -1,29 +1,19 @@
 import asyncio
-import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from analyzer import analyze_stock
+from config import TELEGRAM_TOKEN, CHAT_ID
 
 
 # =========================
-# TOKEN SAFETY FIX (CRITICAL)
-# =========================
-TOKEN = os.getenv("8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU")
-
-if not TOKEN:
-    raise Exception("❌ TELEGRAM_TOKEN eksik (.env kullan)")
-
-
-# =========================
-# FULL S&P500 (STABLE)
+# S&P500 UNIVERSE
 # =========================
 SP500 = [
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","GOOG","TSLA","BRK-B","JPM",
     "UNH","XOM","AVGO","PG","JNJ","V","MA","HD","LLY","MRK",
     "ABBV","COST","PEP","ADBE","CRM","NFLX","AMD","INTC","CSCO","WMT",
-    "BAC","KO","TMO","ACN","DIS","ABT","MCD","LIN","ORCL","CMCSA",
-    "NKE","DHR","TXN","NEE","PM","LOW","UPS","BMY","MS","GS"
+    "BAC","KO","TMO","ACN","DIS","ABT","MCD","LIN","ORCL","CMCSA"
 ]
 
 
@@ -32,17 +22,17 @@ SP500 = [
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏦 INSTITUTIONAL HEDGE FUND v3 AKTİF\n\n"
-        "/top5 → Kurumsal fırsat taraması\n"
+        "🏦 BLACKROCK MODE v4 AKTİF\n\n"
+        "/top5 → Kurumsal fırsatlar\n"
     )
 
 
 # =========================
-# TOP5 ENGINE v3
+# TOP5 ENGINE
 # =========================
 async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    await update.message.reply_text("📊 S&P500 + NEWS + MOMENTUM analiz ediliyor...")
+    await update.message.reply_text("📊 BlackRock AI tarıyor...")
 
     results = []
 
@@ -57,13 +47,13 @@ async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     results = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
 
-    msg = "🏆 INSTITUTIONAL TOP 5 (v3)\n\n"
+    msg = "🏦 BLACKROCK TOP 5 PICKS\n\n"
 
     for i, s in enumerate(results, 1):
         msg += f"{i}. {s['ticker']}\n"
         msg += f"💰 {s['price']:.2f}\n"
         msg += f"🧠 Güven: %{s['confidence']:.1f}\n"
-        msg += "📌 Gerekçe:\n"
+        msg += "📌 Kurumsal gerekçe:\n"
 
         for r in s["reasons"]:
             msg += f"- {r}\n"
@@ -74,13 +64,44 @@ async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================
+# AUTO SIGNAL PUSH (BLACKROCK FEATURE)
+# =========================
+async def auto_signal(app):
+    while True:
+        try:
+            results = []
+
+            for t in SP500:
+                r = analyze_stock(t)
+                if r:
+                    results.append(r)
+
+            top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+
+            msg = "🚨 BLACKROCK AUTO SIGNAL\n\n"
+
+            for s in top:
+                msg += f"{s['ticker']} → %{s['confidence']:.1f}\n"
+
+            await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+
+        except Exception as e:
+            print("Auto signal error:", e)
+
+        await asyncio.sleep(60 * 60)  # 1 saat
+
+
+# =========================
 # MAIN
 # =========================
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top5", top5))
+
+    # background task
+    app.job_queue.run_repeating(lambda ctx: asyncio.create_task(auto_signal(app)), interval=3600, first=10)
 
     app.run_polling(drop_pending_updates=True)
 
