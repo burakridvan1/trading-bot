@@ -3,132 +3,128 @@ import numpy as np
 import pandas as pd
 
 
-# =========================
-# SAFE FLOAT (NO WARNING)
-# =========================
 def safe(series):
     try:
-        if series is None:
-            return None
-
         if isinstance(series, pd.Series):
-            val = series.dropna()
-            if len(val) == 0:
+            series = series.dropna()
+            if len(series) == 0:
                 return None
-            return float(val.iloc[-1])
-
+            return float(series.iloc[-1])
         return float(series)
-
     except:
         return None
 
 
-# =========================
-# RSI
-# =========================
 def compute_rsi(series, period=14):
     try:
         delta = series.diff()
-
         gain = delta.clip(lower=0).rolling(period).mean()
         loss = -delta.clip(upper=0).rolling(period).mean()
 
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
 
-        val = rsi.dropna()
-
-        if len(val) == 0:
+        rsi = rsi.dropna()
+        if len(rsi) == 0:
             return 50
 
-        return float(val.iloc[-1])
-
+        return float(rsi.iloc[-1])
     except:
         return 50
 
 
-# =========================
-# MAIN ANALYZER
-# =========================
 def analyze_stock(ticker):
 
     try:
-        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+        df = yf.download(
+            ticker,
+            period="6mo",      # 🔥 MA200 için gerekli
+            interval="1d",
+            progress=False,
+            threads=False
+        )
 
-        if df is None or df.empty or len(df) < 60:
+        if df is None or df.empty:
             return None
 
         close = df["Close"]
         volume = df["Volume"]
 
+        price = safe(close)
+        if price is None:
+            return None
+
         # =========================
         # INDICATORS
         # =========================
-        ma20 = close.rolling(20).mean()
-        ma50 = close.rolling(50).mean()
-        ma200 = close.rolling(200).mean()
+        ma20 = safe(close.rolling(20).mean())
+        ma50 = safe(close.rolling(50).mean())
+        ma200 = safe(close.rolling(200).mean())
 
         rsi = compute_rsi(close)
-
-        price = safe(close)
-        ma20 = safe(ma20)
-        ma50 = safe(ma50)
-        ma200 = safe(ma200)
 
         vol = safe(volume)
         vol_ma = safe(volume.rolling(20).mean())
 
-        if None in [price, ma20, ma50, ma200]:
-            return None
-
         # =========================
-        # SCORE ENGINE
+        # SCORE SYSTEM
         # =========================
         score = 0
         reasons = []
 
-        # TREND
-        if price > ma20:
-            score += 10
-            reasons.append("MA20 üstü (kısa trend güçlü)")
+        # ✅ MA20 varsa kullan
+        if ma20 is not None:
+            if price > ma20:
+                score += 10
+                reasons.append("MA20 üstü (kısa trend)")
 
-        if ma20 > ma50:
-            score += 15
-            reasons.append("Orta trend yukarı")
+        # ✅ MA50 varsa kullan
+        if ma20 is not None and ma50 is not None:
+            if ma20 > ma50:
+                score += 15
+                reasons.append("MA20 > MA50 (trend güçlü)")
 
-        if ma50 > ma200:
-            score += 20
-            reasons.append("Uzun vadede güçlü trend")
+        # ✅ MA200 varsa kullan
+        if ma50 is not None and ma200 is not None:
+            if ma50 > ma200:
+                score += 20
+                reasons.append("MA50 > MA200 (uzun trend güçlü)")
 
-        # RSI
+        # RSI HER ZAMAN VAR
         if rsi < 30:
             score += 15
-            reasons.append("RSI aşırı satım (rebound)")
+            reasons.append("RSI düşük (alım fırsatı)")
         elif rsi > 70:
             score -= 10
-            reasons.append("RSI aşırı alım (risk)")
+            reasons.append("RSI yüksek (risk)")
 
         # HACİM
-        if vol and vol_ma and vol > vol_ma:
-            score += 15
-            reasons.append("Hacim artışı")
+        if vol and vol_ma:
+            if vol > vol_ma:
+                score += 10
+                reasons.append("Hacim artışı")
 
-        # SIKIŞMA
-        if abs(price - ma20) / price < 0.03:
-            score += 10
-            reasons.append("Sıkışma (breakout yakın)")
-
-        # VOLATILITY (FIXED)
+        # VOLATILITY
         returns = close.pct_change().dropna()
-
-        if len(returns) > 0:
-            volatility = np.std(returns.values) * 100  # ✅ FIX
+        if len(returns) > 10:
+            volatility = np.std(returns.values) * 100
 
             if volatility < 2:
                 score += 10
-                reasons.append("Düşük volatilite (akümülasyon)")
+                reasons.append("Düşük volatilite")
 
-        score = max(0, min(100, score))
+        # SIKIŞMA
+        if ma20 is not None:
+            if abs(price - ma20) / price < 0.03:
+                score += 10
+                reasons.append("Sıkışma (breakout yakın)")
+
+        # 🔥 KRİTİK: minimum skor
+        score = max(5, min(100, score))
+
+        # 🔥 KRİTİK: reason boş kalmasın
+        if not reasons:
+            reasons.append("Temel teknik yapı nötr")
 
         return {
             "ticker": ticker,
@@ -139,5 +135,5 @@ def analyze_stock(ticker):
         }
 
     except Exception as e:
-        print("ANALYZER ERROR:", ticker, e)
+        print("ERROR:", ticker, e)
         return None
