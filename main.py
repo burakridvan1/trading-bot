@@ -1,13 +1,21 @@
-import pandas as pd
-
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-import config
 from analyzer import analyze_stock
 
 
-app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
+# =========================
+# FULL S&P 500 UNIVERSE (STABLE STATIC)
+# =========================
+SP500 = [
+    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","GOOG","TSLA","BRK-B","JPM",
+    "UNH","XOM","AVGO","PG","JNJ","V","MA","HD","LLY","MRK",
+    "ABBV","COST","PEP","ADBE","CRM","NFLX","AMD","INTC","CSCO","WMT",
+    "BAC","KO","TMO","ACN","DIS","ABT","MCD","LIN","ORCL","CMCSA",
+    "NKE","DHR","TXN","NEE","PM","LOW","UPS","BMY","MS","GS",
+    "RTX","CAT","QCOM","IBM","SPGI","INTU","AMGN","ISRG","BLK","CVX"
+]
 
 
 # =========================
@@ -15,49 +23,42 @@ app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏦 KURUMSAL QUANT SİSTEM AKTİF\n\n"
-        "/top5 → En güçlü yatırım fırsatları\n"
-        "Sistem ABD hisselerini analiz eder ve kurumsal skor üretir"
+        "🏦 HEDGE FUND QUANT SYSTEM AKTİF\n\n"
+        "Komutlar:\n"
+        "/top5 → En güçlü yatırım fırsatları\n\n"
+        "Sistem S&P500 evrenini analiz eder."
     )
 
 
 # =========================
-# TICKERS
+# TOP5 ENGINE
 # =========================
-def get_tickers():
-    try:
-        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-        df = pd.read_html(url)[0]
-        return df["Symbol"].tolist()
-    except:
-        return []
+async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    await update.message.reply_text("📊 S&P500 taranıyor... kurumsal model çalışıyor")
 
-# =========================
-# TOP 5
-# =========================
-async def top5(update, context):
-    await update.message.reply_text("📊 Piyasalar taranıyor... kurumsal analiz çalışıyor")
-
-    tickers = get_tickers()
     results = []
 
-    for t in tickers[:150]:
-        r = analyze_stock(t)
+    # paralel hisseden önce stabil sync tarama
+    for ticker in SP500:
+        r = analyze_stock(ticker)
         if r:
             results.append(r)
 
-    results = sorted(results, key=lambda x: x["confidence"], reverse=True)
+    if not results:
+        await update.message.reply_text("❌ Veri alınamadı. API kısıtı olabilir.")
+        return
 
+    results = sorted(results, key=lambda x: x["confidence"], reverse=True)
     top = results[:5]
 
-    msg = "🏆 EN GÜÇLÜ 5 YATIRIM FIRSATI\n\n"
+    msg = "🏆 HEDGE FUND – TOP 5 FIRSAT\n\n"
 
     for i, s in enumerate(top, 1):
         msg += f"{i}. {s['ticker']}\n"
         msg += f"💰 Fiyat: {s['price']:.2f}\n"
-        msg += f"🧠 Güven Skoru: %{s['confidence']:.1f}\n"
-        msg += "📌 Analiz:\n"
+        msg += f"🧠 Kurumsal Güven: %{s['confidence']:.1f}\n"
+        msg += "📌 Neden bu hisse:\n"
 
         for r in s["reasons"]:
             msg += f" - {r}\n"
@@ -71,6 +72,8 @@ async def top5(update, context):
 # MAIN
 # =========================
 def main():
+    app = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top5", top5))
 
