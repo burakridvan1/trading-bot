@@ -1,114 +1,152 @@
-import yfinance as yf
-import numpy as np
+import asyncio
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+from analyzer import analyze_stock
+from config import TELEGRAM_TOKEN, CHAT_ID
 
 
-def safe(x):
-    try:
-        return float(x.iloc[-1])
-    except:
-        return None
+UNIVERSE = [
+    "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA",
+    "JPM","UNH","XOM","AVGO","PG","JNJ","V","MA",
+    "HD","LLY","MRK","ABBV","COST","PEP","ADBE"
+]
 
 
-def analyze_stock(ticker):
-
-    try:
-        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
-
-        if df is None or df.empty or len(df) < 60:
-            return None
-
-        close = df["Close"]
-        volume = df["Volume"]
-
-        # =========================
-        # INDICATORS
-        # =========================
-        ma20 = close.rolling(20).mean()
-        ma50 = close.rolling(50).mean()
-        ma200 = close.rolling(200).mean()
-        rsi = compute_rsi(close)
-
-        price = safe(close)
-        ma20 = safe(ma20)
-        ma50 = safe(ma50)
-        ma200 = safe(ma200)
-        rsi = rsi if rsi else 50
-
-        vol = safe(volume)
-        vol_ma = safe(volume.rolling(20).mean())
-
-        if None in [price, ma20, ma50, ma200]:
-            return None
-
-        # =========================
-        # V6 HEDGE FUND SCORE
-        # =========================
-        score = 0
-        reasons = []
-
-        # Trend Structure
-        if price > ma20:
-            score += 10
-            reasons.append("Price above MA20")
-
-        if ma20 > ma50:
-            score += 15
-            reasons.append("Bullish MA alignment (20>50)")
-
-        if ma50 > ma200:
-            score += 20
-            reasons.append("Long-term uptrend (50>200)")
-
-        # Momentum
-        if rsi < 30:
-            score += 15
-            reasons.append("Oversold rebound zone (RSI)")
-        elif rsi > 70:
-            score -= 10
-            reasons.append("Overbought risk (RSI)")
-
-        # Volume confirmation
-        if vol and vol_ma and vol > vol_ma:
-            score += 15
-            reasons.append("Institutional volume inflow")
-
-        # Mean reversion opportunity
-        if abs(price - ma20) / price < 0.03:
-            score += 10
-            reasons.append("Price compression zone")
-
-        # Risk filter
-        volatility = np.std(close.pct_change().dropna()) * 100
-
-        if volatility < 2:
-            score += 10
-            reasons.append("Low volatility accumulation")
-
-        # clamp
-        score = max(0, min(100, score))
-
-        return {
-            "ticker": ticker,
-            "price": price,
-            "confidence": score,
-            "rsi": rsi,
-            "reasons": reasons
-        }
-
-    except:
-        return None
+# =========================
+# START
+# =========================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🏦 V7 HEDGE FUND AI AKTİF\n\n"
+        "/top5 → en iyi fırsatlar\n"
+        "/scan → tüm liste\n"
+        "/analyze AAPL → tek hisse analiz\n"
+    )
 
 
-# RSI CALC
-def compute_rsi(series, period=14):
-    try:
-        delta = series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+# =========================
+# ANALYZE SINGLE
+# =========================
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
+    if len(context.args) == 0:
+        await update.message.reply_text("Kullanım: /analyze AAPL")
+        return
 
-        return float(rsi.iloc[-1])
-    except:
-        return 50
+    ticker = context.args[0].upper()
+
+    result = analyze_stock(ticker)
+
+    if not result:
+        await update.message.reply_text("Veri alınamadı")
+        return
+
+    msg = f"📊 {ticker} ANALİZ\n\n"
+    msg += f"💰 Fiyat: {result['price']:.2f}\n"
+    msg += f"🧠 Skor: %{result['confidence']}\n"
+    msg += f"📉 RSI: {result['rsi']:.1f}\n\n"
+
+    for r in result["reasons"]:
+        msg += f"- {r}\n"
+
+    await update.message.reply_text(msg)
+
+
+# =========================
+# TOP5
+# =========================
+async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text("Analiz yapılıyor...")
+
+    results = []
+
+    for t in UNIVERSE:
+        r = analyze_stock(t)
+        if r:
+            results.append(r)
+
+    results = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+
+    msg = "🏆 EN GÜÇLÜ 5 YATIRIM FIRSATI\n\n"
+
+    for i, r in enumerate(results, 1):
+        msg += f"{i}. {r['ticker']} (%{r['confidence']})\n"
+
+    await update.message.reply_text(msg)
+
+
+# =========================
+# SCAN
+# =========================
+async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text("Tarama yapılıyor...")
+
+    results = []
+
+    for t in UNIVERSE:
+        r = analyze_stock(t)
+        if r:
+            results.append(r)
+
+    results = sorted(results, key=lambda x: x["confidence"], reverse=True)
+
+    msg = "📊 TÜM PİYASA\n\n"
+
+    for r in results[:10]:
+        msg += f"{r['ticker']} → %{r['confidence']}\n"
+
+    await update.message.reply_text(msg)
+
+
+# =========================
+# AUTO SIGNAL
+# =========================
+async def auto_engine(app):
+    while True:
+        try:
+            results = []
+
+            for t in UNIVERSE:
+                r = analyze_stock(t)
+                if r:
+                    results.append(r)
+
+            top = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
+
+            msg = "🚨 OTOMATİK SİNYAL\n\n"
+
+            for r in top:
+                msg += f"{r['ticker']} → %{r['confidence']}\n"
+
+            await app.bot.send_message(chat_id=CHAT_ID, text=msg)
+
+        except Exception as e:
+            print(e)
+
+        await asyncio.sleep(21600)
+
+
+async def post_init(app):
+    asyncio.create_task(auto_engine(app))
+
+
+# =========================
+# MAIN
+# =========================
+def main():
+
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("top5", top5))
+    app.add_handler(CommandHandler("scan", scan))
+    app.add_handler(CommandHandler("analyze", analyze))
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
