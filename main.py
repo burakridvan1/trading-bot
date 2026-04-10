@@ -1,4 +1,5 @@
 import asyncio
+import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
@@ -6,15 +7,23 @@ from analyzer import analyze_stock
 
 
 # =========================
-# FULL S&P 500 UNIVERSE (STABLE STATIC)
+# TOKEN SAFETY FIX (CRITICAL)
+# =========================
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+if not TOKEN:
+    raise Exception("❌ TELEGRAM_TOKEN eksik (.env kullan)")
+
+
+# =========================
+# FULL S&P500 (STABLE)
 # =========================
 SP500 = [
     "AAPL","MSFT","NVDA","AMZN","META","GOOGL","GOOG","TSLA","BRK-B","JPM",
     "UNH","XOM","AVGO","PG","JNJ","V","MA","HD","LLY","MRK",
     "ABBV","COST","PEP","ADBE","CRM","NFLX","AMD","INTC","CSCO","WMT",
     "BAC","KO","TMO","ACN","DIS","ABT","MCD","LIN","ORCL","CMCSA",
-    "NKE","DHR","TXN","NEE","PM","LOW","UPS","BMY","MS","GS",
-    "RTX","CAT","QCOM","IBM","SPGI","INTU","AMGN","ISRG","BLK","CVX"
+    "NKE","DHR","TXN","NEE","PM","LOW","UPS","BMY","MS","GS"
 ]
 
 
@@ -23,45 +32,41 @@ SP500 = [
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏦 HEDGE FUND QUANT SYSTEM AKTİF\n\n"
-        "Komutlar:\n"
-        "/top5 → En güçlü yatırım fırsatları\n\n"
-        "Sistem S&P500 evrenini analiz eder."
+        "🏦 INSTITUTIONAL HEDGE FUND v3 AKTİF\n\n"
+        "/top5 → Kurumsal fırsat taraması\n"
     )
 
 
 # =========================
-# TOP5 ENGINE
+# TOP5 ENGINE v3
 # =========================
 async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    await update.message.reply_text("📊 S&P500 taranıyor... kurumsal model çalışıyor")
+    await update.message.reply_text("📊 S&P500 + NEWS + MOMENTUM analiz ediliyor...")
 
     results = []
 
-    # paralel hisseden önce stabil sync tarama
-    for ticker in SP500:
-        r = analyze_stock(ticker)
+    for t in SP500:
+        r = analyze_stock(t)
         if r:
             results.append(r)
 
     if not results:
-        await update.message.reply_text("❌ Veri alınamadı. API kısıtı olabilir.")
+        await update.message.reply_text("❌ Veri alınamadı")
         return
 
-    results = sorted(results, key=lambda x: x["confidence"], reverse=True)
-    top = results[:5]
+    results = sorted(results, key=lambda x: x["confidence"], reverse=True)[:5]
 
-    msg = "🏆 HEDGE FUND – TOP 5 FIRSAT\n\n"
+    msg = "🏆 INSTITUTIONAL TOP 5 (v3)\n\n"
 
-    for i, s in enumerate(top, 1):
+    for i, s in enumerate(results, 1):
         msg += f"{i}. {s['ticker']}\n"
-        msg += f"💰 Fiyat: {s['price']:.2f}\n"
-        msg += f"🧠 Kurumsal Güven: %{s['confidence']:.1f}\n"
-        msg += "📌 Neden bu hisse:\n"
+        msg += f"💰 {s['price']:.2f}\n"
+        msg += f"🧠 Güven: %{s['confidence']:.1f}\n"
+        msg += "📌 Gerekçe:\n"
 
         for r in s["reasons"]:
-            msg += f" - {r}\n"
+            msg += f"- {r}\n"
 
         msg += "\n"
 
@@ -72,7 +77,7 @@ async def top5(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # =========================
 def main():
-    app = ApplicationBuilder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("top5", top5))
