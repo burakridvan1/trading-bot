@@ -9,7 +9,7 @@ from analyzer import analyze_stock
 # =========================
 # TOKEN SAFETY FIX (CRITICAL)
 # =========================
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("8789711602:AAEypX4ngAN0XZA2_B4cOB3HRTp5kT5JkVU")
 
 if not TOKEN:
     raise Exception("❌ TELEGRAM_TOKEN eksik (.env kullan)")
